@@ -41,6 +41,9 @@ The implementation must follow the actual assessment brief. Do not invent requir
 - OS: macOS
 - Python: 3.14.7
 - FastAPI: 0.141.1
+- SQLAlchemy: 2.0.52
+- Alembic: 1.19.2
+- psycopg: 3.3.5
 - Virtual environment: `.venv`
 - Package manager: pip
 - Development IDE: PyCharm Professional
@@ -242,7 +245,7 @@ routers, SQLAlchemy, Alembic, Docker, or later-milestone functionality.
 
 ## Milestone 2 — Database + Models + Alembic
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Planned:
 - PostgreSQL connection
@@ -251,6 +254,28 @@ Planned:
 - Alembic
 - initial migration
 - verification against real PostgreSQL
+
+Completed implementation:
+- `app/database.py` creates a PostgreSQL SQLAlchemy engine, shared declarative
+  base, session factory, and request-scoped `get_db()` generator dependency.
+- `app/models/` contains only `User`, `Booking`, and `Review` models plus shared
+  role/status enums. There is intentionally no Slot or ProviderSlot table.
+- `alembic.ini`, `alembic/env.py`, and `alembic/script.py.mako` configure
+  environment-based PostgreSQL migrations and model metadata discovery.
+- The initial migration creates the users, bookings, and reviews tables, their
+  relationships, constraints, indexes, and PostgreSQL enum types.
+- `tests/test_database.py` checks PostgreSQL targeting, registered tables, and
+  session construction.
+
+Approved schema decisions:
+- A booking stores the selected provider time interval through `starts_at` and
+  `ends_at`; the assessment does not explicitly require an independent slot or
+  availability table.
+- Users have `admin`, `provider`, and `customer` roles.
+- Email is unique, reviews are one per booking, ratings are 1 through 5, and
+  booking intervals must end after they start.
+- Review completion eligibility remains application logic for a later milestone;
+  it is not incorrectly enforced as a cross-table database check.
 
 ---
 
@@ -342,9 +367,11 @@ Planned:
 
 # 9. Current Task
 
-**Current milestone:** Milestone 1
+**Current milestone:** Milestone 2
 
-**Current state:** No assessment implementation has been created yet.
+**Current state:** Milestones 1 and 2 are implemented. The PostgreSQL schema and
+SQLAlchemy/Alembic infrastructure are present, but direct PostgreSQL migration
+verification is pending because no local PostgreSQL server is running.
 
 FastAPI learning has been completed through:
 - application creation
@@ -359,6 +386,8 @@ FastAPI learning has been completed through:
 - FastAPI dependencies / Depends
 - basic project structure
 - basic pytest/TestClient testing
+- SQLAlchemy declarative models and sessions
+- Alembic migrations and metadata discovery
 
 ---
 
@@ -400,6 +429,41 @@ initial scaffolding.
 Those dependencies belong to later assessment milestones and would make the
 initial project harder to understand and verify.
 
+### 2026-09-11 Milestone 2 schema
+
+**Decision:**
+Use only `users`, `bookings`, and `reviews` tables. Represent a selected time
+slot as the booking interval and do not add a Slot or ProviderSlot table.
+
+**Reason:**
+The assessment explicitly names Users, Bookings, and Reviews in the PostgreSQL
+schema, but does not explicitly require independent availability management or a
+slot table.
+
+**Alternative considered:**
+Adding a separate provider availability table for unbooked slots.
+
+**Why rejected:**
+That would infer an API and data model not stated in the brief. It can be added
+later only if a concrete requirement requires independently managed availability.
+
+### 2026-09-11 Milestone 2 PostgreSQL configuration
+
+**Decision:**
+Read `DATABASE_URL` from the environment, with a localhost PostgreSQL default for
+application imports, and require `DATABASE_URL` explicitly when running Alembic.
+
+**Reason:**
+The application remains importable without a running database, while migrations
+cannot accidentally run against an unspecified database.
+
+**Alternative considered:**
+SQLite fallback or hard-coded credentials.
+
+**Why rejected:**
+The assessment requires PostgreSQL as the real target, and hard-coded credentials
+are unsafe.
+
 ---
 
 # 11. Lessons Learned
@@ -429,6 +493,20 @@ existing environment reproducibly from `pyproject.toml`.
 **What future agents should do:**
 Check the existing virtual environment before running checks, and install only the
 dependencies declared for the current milestone when tools are missing.
+
+### 2026-09-11 Milestone 2 implementation
+
+**What happened:**
+Adding the Alembic directory caused setuptools automatic package discovery to see
+both `app` and `alembic` as top-level packages.
+
+**What we learned:**
+Application package discovery must be explicit when repository tooling directories
+are present at the project root.
+
+**What future agents should do:**
+Keep setuptools discovery limited to `app*` and do not package Alembic scripts as
+Python application packages.
 
 ---
 
@@ -465,6 +543,22 @@ pytest, and Ruff.
 Inspect the environment and install the declared project dependencies before
 running milestone checks.
 
+### 2026-09-11 Duplicate enum migration SQL
+
+**Problem:**
+The first migration draft emitted each PostgreSQL enum type twice in offline SQL.
+
+**Cause:**
+The migration explicitly created the enum and the table column definition also
+requested enum creation.
+
+**Fix:**
+Removed the explicit enum creation and let the table definitions create each type
+once; downgrade still drops the types after the tables.
+
+**Prevention:**
+Inspect generated PostgreSQL migration SQL before running it against a database.
+
 ---
 
 # 13. Verification Log
@@ -496,6 +590,23 @@ All checks passed. Ruff reported no issues; pytest collected one test and report
 Pytest reported two third-party deprecation warnings from the installed Starlette/
 AnyIO stack. They do not affect the passing test or application behavior.
 
+### 2026-09-11 Milestone 2 verification
+
+**Command/check:**
+Ruff, pytest, FastAPI import, SQLAlchemy engine/session setup, mapper configuration,
+and Alembic offline SQL generation targeting PostgreSQL.
+
+**Result:**
+Ruff passed; pytest collected four tests and reported `4 passed`; the application
+imported successfully; the engine dialect was PostgreSQL; all three model
+relationships configured successfully; and offline Alembic SQL contained the
+three domain tables and two enum types exactly once.
+
+**Not verified:**
+No PostgreSQL server was available on localhost:5432, so live Alembic upgrade,
+schema inspection, relationship inserts, downgrade, and upgrade-again checks
+could not be run. Docker was also unavailable.
+
 ---
 
 # 14. Change Log
@@ -521,15 +632,27 @@ Format:
   root endpoint returned HTTP 200 with the expected response.
 - Commit: Not created; the developer will commit the work.
 
+### 2026-09-11 Milestone 2 completed
+
+- Changed: Added PostgreSQL SQLAlchemy setup, User/Booking/Review models, Alembic
+  configuration, the initial migration, and database-focused tests.
+- Reason: Implemented the approved Milestone 2 schema without adding a slot table
+  or any later-milestone API/authentication/Redis/Docker functionality.
+- Verification: Ruff passed, pytest passed (`4 passed`), imports and mapper setup
+  passed, and PostgreSQL-targeted offline migration SQL was inspected. Live
+  PostgreSQL migration verification remains pending because no local server was
+  available.
+- Commit: Not created; the developer will review and commit the work.
+
 ---
 
 # 15. Current Next Steps
 
 This section must always reflect the immediate next actions.
 
-1. Review the Milestone 1 changes and create the developer-owned commit.
-2. Begin Milestone 2 only after the Milestone 1 commit is complete.
-3. For Milestone 2, add PostgreSQL, SQLAlchemy, models, and Alembic according to
-  the assessment requirements.
+1. Review the Milestone 2 changes and run them against a real PostgreSQL instance.
+2. Verify migration upgrade, schema, relationships, downgrade, and upgrade again.
+3. Create the developer-owned Milestone 2 commit.
+4. Begin Milestone 3 only after Milestone 2 review and commit are complete.
 
 Agents must update this section whenever the project state changes.
