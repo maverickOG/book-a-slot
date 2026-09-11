@@ -292,7 +292,7 @@ Approved schema decisions:
 
 ## Milestone 3 — Authentication + RBAC
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Planned:
 - signup
@@ -302,6 +302,41 @@ Planned:
 - customer/provider/admin authorization
 - appropriate access restrictions
 - tests for role isolation
+
+Completed implementation:
+- `passlib` (runtime dependency) hashes passwords with the pure-Python
+  `pbkdf2_sha256` scheme. `passlib[bcrypt]` was rejected: passlib 1.7.4 is
+  unmaintained and incompatible with bcrypt 5.0 on Python 3.14.
+- `users.token` holds the DB-stored bearer token; it is null until login,
+  populated at login, unique when set.
+- `app/security.py` exposes exactly `get_password_hash`, `verify_password`,
+  `get_current_user`, `require_admin`, `require_provider`, `require_customer`.
+  `get_current_user` parses `Authorization: Bearer <token>`, looks up the token in
+  `users.token`, and returns the User (401 otherwise). Role dependencies return
+  the user or raise 403.
+- `app/routers/auth.py` exposes only `POST /auth/signup`, `POST /auth/login`,
+  `GET /auth/me`. Signup always creates a customer (no role in the payload, so an
+  anonymous caller cannot elevate). Login verifies the password and issues a
+  `secrets.token_urlsafe(32)` token.
+- No booking or review endpoints, no ownership helpers, no JWT, no logout, no
+  Redis. M4 will consume `get_current_user` plus its own booking ownership
+  dependencies.
+- Tests: `tests/test_auth.py` covers signup, duplicate email, login success and
+  failure, and `/auth/me` with missing/invalid/valid tokens.
+  `tests/test_security.py` exercises the role dependencies directly with in-memory
+  User objects only.
+- Post-review hardening: signup commit is wrapped in `try/except IntegrityError`
+  (rollback + 400) so concurrent duplicate emails cannot surface as a 500;
+  a test proves a `role: "admin"` signup payload still creates a customer; the
+  `/auth/me` response keys are asserted to be exactly `{id, email, role}`.
+
+Approved M3 decisions:
+- DB-stored bearer token instead of JWT: simpler, revocable (set token to NULL),
+  explainable, and consistent with a PostgreSQL-centric service. JWT signing key,
+  expiration, and refresh flows are not required by the brief.
+- Tests use an in-memory SQLite database via FastAPI dependency override of
+  `get_db` (documented isolated-test allowance in AGENTS.md). PostgreSQL remains
+  the only real database.
 
 Do not implement a complex middleware/policy system unless the actual requirements
 justify it.
@@ -378,11 +413,13 @@ Planned:
 
 # 9. Current Task
 
-**Current milestone:** Milestone 2
+**Current milestone:** Milestone 3
 
-**Current state:** Milestones 1 and 2 are implemented. The PostgreSQL schema and
-SQLAlchemy/Alembic infrastructure are present, but direct PostgreSQL migration
-verification is pending because no local PostgreSQL server is running.
+**Current state:** Milestones 1 and 2 are implemented and reviewed. Milestone 3
+(authentication + RBAC infrastructure) is implemented, hardened after a strict
+code review, and verified with 22 passing tests. Direct PostgreSQL migration
+verification remains pending because no local PostgreSQL server is running.
+Booking CRUD (M4) is the next milestone.
 
 FastAPI learning has been completed through:
 - application creation
@@ -399,6 +436,9 @@ FastAPI learning has been completed through:
 - basic pytest/TestClient testing
 - SQLAlchemy declarative models and sessions
 - Alembic migrations and metadata discovery
+- password hashing and verification (passlib pbkdf2_sha256)
+- bearer-token authentication and FastAPI dependency injection
+- role-gated dependencies (admin/provider/customer)
 
 ---
 
@@ -498,6 +538,80 @@ SQLite fallback or hard-coded credentials.
 The assessment requires PostgreSQL as the real target, and hard-coded credentials
 are unsafe.
 
+### 2026-09-11 Milestone 3 password hashing
+
+**Decision:**
+Add `passlib` as a runtime dependency and hash with the pure-Python
+`pbkdf2_sha256` scheme instead of `passlib[bcrypt]`.
+
+**Reason:**
+Verification on Python 3.14.7 showed `passlib[bcrypt]` fails: passlib 1.7.4 is
+unmaintained and reads `bcrypt.__about__.__version__`, which bcrypt 5.0 removed.
+Its self-check also triggers bcrypt's 72-byte password error. `pbkdf2_sha256` is
+implemented on top of stdlib `hashlib.pbkdf2_hmac`, needs no C backend, and was
+verified to hash and verify correctly.
+
+**Alternative considered:**
+Pinning `bcrypt<4.1`, or calling `hashlib.pbkdf2_hmac` directly.
+
+**Why rejected:**
+Old bcrypt wheels are unavailable for Python 3.14 (source build risk). Writing
+salted PBKDF2 manually duplicates what passlib already does correctly.
+
+### 2026-09-11 Milestone 3 DB-stored bearer token
+
+**Decision:**
+Authenticate with a random token stored in `users.token` (given out at login),
+not JWT.
+
+**Reason:**
+The brief only requires "bearer authentication". A stored token needs no signing
+key, no expiration/refresh flow, and is revocable simply by setting
+`users.token` to NULL. It is easy to explain and fits a PostgreSQL-centric
+service.
+
+**Alternative considered:**
+JWT with `python-jose` or PyJWT.
+
+**Why rejected:**
+JWT adds signing-key management, expirations, and refresh logic that the brief
+does not ask for. It is not "simpler" for this scope, and choosing it merely for
+convention would violate the minimal design rule.
+
+### 2026-09-11 Milestone 3 signup role
+
+**Decision:**
+`POST /auth/signup` always creates a `customer`.
+
+**Reason:**
+Signup is anonymous. Accepting a role in the signup payload would let anyone
+register as admin or provider. Admin/provider users will come from seed data
+(Milestone 6) or direct DB insert.
+
+**Alternative considered:**
+Accepting a role field on signup.
+
+**Why rejected:**
+That is an obvious privilege-escalation hole and is not required by the brief.
+
+### 2026-09-11 Milestone 3 test database
+
+**Decision:**
+Tests use an in-memory SQLite database through a FastAPI dependency override of
+`get_db` (in `tests/conftest.py`); PostgreSQL remains the only real database.
+
+**Reason:**
+Auth endpoint tests must persist signups and tokens. No PostgreSQL server is
+available locally and Docker is not installed yet. AGENTS.md explicitly allows
+SQLite for an isolated, documented test setup.
+
+**Alternative considered:**
+Running a real PostgreSQL container for tests.
+
+**Why rejected:**
+Docker is not installed on this machine; CI (Milestone 7) can use the compose
+stack. The application code never references SQLite.
+
 ---
 
 # 11. Lessons Learned
@@ -541,6 +655,25 @@ are present at the project root.
 **What future agents should do:**
 Keep setuptools discovery limited to `app*` and do not package Alembic scripts as
 Python application packages.
+
+### 2026-09-11 Milestone 3 passlib and bcrypt
+
+**What happened:**
+Installing `passlib[bcrypt]` on Python 3.14.7 installed passlib 1.7.4 and bcrypt
+5.0.0, but the first hash attempt raised `AttributeError: module 'bcrypt' has no
+attribute '__about__'`, followed by a `ValueError` about passwords longer than 72
+bytes during passlib's backend self-check.
+
+**What we learned:**
+passlib 1.7.4 is unmaintained and only compatible with bcrypt < 4.1. bcrypt 5.0
+removed the `__about__` module; the self-check also runs a 72-byte test that
+bcrypt 5.0 rejects. passlib's own `pbkdf2_sha256` scheme is pure Python (stdlib
+`hashlib`) and works correctly on Python 3.14.
+
+**What future agents should do:**
+Verify hashing libraries actually hash/verify on the current Python before adding
+them to `pyproject.toml`. Prefer `passlib`'s `pbkdf2_sha256` on Python 3.14; do
+not reach for `passlib[bcrypt]`.
 
 ---
 
@@ -592,6 +725,25 @@ once; downgrade still drops the types after the tables.
 
 **Prevention:**
 Inspect generated PostgreSQL migration SQL before running it against a database.
+
+### 2026-09-11 passlib[bcrypt] failure on Python 3.14
+
+**Problem:**
+Planning to hash with `passlib[bcrypt]`, but the first hash call raised
+`AttributeError` (bcrypt has no `__about__`) and then `ValueError` (72-byte check).
+
+**Cause:**
+passlib 1.7.4 is unmaintained; bcrypt 5.0 removed `bcrypt.__about__.__version__`
+that passlib reads, and bcrypt 5.0 also rejects the >= 72-byte password passlib
+uses in its self-check.
+
+**Fix:**
+Switched to passlib's pure-Python `pbkdf2_sha256` scheme (stdlib `hashlib`), added
+plain `passlib` as a runtime dependency, and verified hashing/verification on
+Python 3.14.
+
+**Prevention:**
+Verify hashing/verification on the actual Python before locking a dependency.
 
 ---
 
@@ -656,6 +808,38 @@ NULL`.
 Live PostgreSQL execution of the migration. The migration is simple DDL but needs
 a running server to confirm execution and rollback.
 
+### 2026-09-11 Milestone 3 verification
+
+**Command/check:**
+Ruff, pytest, FastAPI import + OpenAPI route listing, and Alembic offline
+upgrade/downgrade SQL for migration `20260911_0003`.
+
+**Result:**
+Ruff passed; pytest collected 21 tests and reported `21 passed` (8 auth, 3
+pre-existing database, 1 root endpoint, 9 role-dependency); the OpenAPI schema
+listed `/auth/signup`, `/auth/login`, `/auth/me`; offline upgrade SQL showed
+`ADD COLUMN token VARCHAR(255)` and `ADD CONSTRAINT uq_users_token UNIQUE (token)`;
+downgrade SQL dropped the constraint then the column.
+
+**Not verified:**
+Live PostgreSQL execution of migration `20260911_0003`; live token lookup via
+`users.token` against a real server. These need a running PostgreSQL/Docker stack.
+
+### 2026-09-11 Milestone 3 review fixes verification
+
+**Command/check:**
+Ruff and pytest after applying the three review fixes, plus runtime probes of
+`HTTPBearer` (no header, `Basic`, empty `Bearer`, lowercase `bearer`) and
+pydantic extra-field handling for the signup payload.
+
+**Result:**
+Ruff passed; pytest collected 22 tests and reported `22 passed` (9 auth, 3
+pre-existing database, 1 root endpoint, 9 role-dependency). HTTPBearer returns
+None (→ 401) for missing/`Basic`/empty-token headers and tolerates lowercase
+`bearer`; pydantic silently drops an extra `role` field from the signup payload,
+so signup cannot self-assign a role. The exact `/auth/me` key set `{id, email,
+role}` is now asserted, confirming `password_hash` and `token` are not exposed.
+
 ---
 
 # 14. Change Log
@@ -706,15 +890,48 @@ Format:
   (DROP COLUMN + ALTER COLUMN SET NOT NULL).
 - Commit: Not created; the developer will review and commit the work.
 
+### 2026-09-11 Milestone 3 completed
+
+- Changed: Added passlib (`pbkdf2_sha256`) hashing as a runtime dependency,
+  `users.token` bearer-token column (migration `20260911_0003`), `app/security.py`
+  (hashing, `get_current_user`, admin/provider/customer role dependencies), and
+  `app/routers/auth.py` (`POST /auth/signup`, `POST /auth/login`, `GET /auth/me`).
+- Reason: Implemented the assessment's authentication and role-based access
+  control requirements without booking/review endpoints, ownership helpers, JWT,
+  logout, or Redis.
+- Verification: Ruff passed; pytest passed (`21 passed`); OpenAPI listed the three
+  auth routes; offline Alembic upgrade/downgrade SQL for `20260911_0003` verified.
+  Live PostgreSQL migration execution remains pending.
+- Commit: Not created; the developer will review and commit the work.
+
+### 2026-09-11 Milestone 3 review fixes
+
+- Changed: Wrapped the signup commit in `try/except IntegrityError` (rollback +
+  400) in `app/routers/auth.py`; added a signup role-escalation test
+  (`role: "admin"` still creates a customer) and an exact-response-keys assertion
+  for `/auth/me` (`{id, email, role}`) in `tests/test_auth.py`.
+- Reason: Strict code review found the duplicate-email pre-check had a
+  check-then-insert race (concurrent signups could raise an unhandled 500), and
+  the role-escalation guard and /auth/me non-leak guarantee were genuine M3
+  security requirements that were untested.
+- Verification: Ruff passed; pytest passed (`22 passed`).
+- Commit: Not created; the developer will review and commit the work.
+
 ---
 
 # 15. Current Next Steps
 
 This section must always reflect the immediate next actions.
 
-1. Review the Milestone 2 changes and run them against a real PostgreSQL instance.
-2. Verify migration upgrade, schema, relationships, downgrade, and upgrade again.
-3. Create the developer-owned Milestone 2 commit.
-4. Begin Milestone 3 only after Milestone 2 review and commit are complete.
+1. Create the developer-owned Milestone 2 and Milestone 3 commits. The M3 review
+   is complete and no critical issues were found; the three SHOULD FIX items are
+   applied, verified (22 passing tests), and recorded below. The developer must
+   approve before creation.
+2. Begin Milestone 4 (Booking CRUD) after the Milestone 3 commits; it will consume
+   `get_current_user` and add booking ownership dependencies
+   (`require_owner_or_admin`, `require_booking_customer`).
+3. Milestones 1–3 are implemented. Live PostgreSQL/Redis verification of
+   migrations and auth flows remains pending until Docker/PostgreSQL is
+   available (Milestone 6).
 
 Agents must update this section whenever the project state changes.
