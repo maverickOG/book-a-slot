@@ -469,7 +469,8 @@ Do not implement a background worker or real AI summarisation in this milestone.
 
 ## Milestone 6 — Docker + GitHub Actions + Live Smoke Test
 
-Status: COMPLETE (implementation)
+Status: COMPLETE (implementation verified by Milestone 7's CI evidence; see the
+Verification Log)
 
 Planned:
 - Dockerfile
@@ -535,11 +536,17 @@ Verification (CI run 34573662242, commit `8e46364`):
 This is the first time the application has been proven against live PostgreSQL
 and Redis.
 
+Commit:
+- `cd50e7c` (`chore(docs): record CI verification and update project state`):
+  the Milestone 7 completion/state record, pushed before Milestone 8. The CI
+  run it documents (34573662242) was triggered by the preceding M6 commit
+  `8e46364`.
+
 ---
 
 ## Milestone 8 — Documentation + Technical Note
 
-Status: NOT STARTED
+Status: PARTIALLY COMPLETE
 
 Planned:
 - README
@@ -549,22 +556,47 @@ Planned:
 - 300–500 word technical note
 - production-readiness considerations
 
+Completed commit `66d9ef4` (`docs: add README and MIT license`):
+- `README.md` (450 lines) documents the whole project: overview, features, tech
+  stack, architecture, project structure, setup instructions (Docker Compose
+  and non-Docker local development), configuration, database migrations, API
+  and endpoint documentation with the booking model, authentication & RBAC,
+  Redis/review summarisation, testing, Docker, CI, API documentation links,
+  and production-readiness considerations.
+- `LICENSE` adds the MIT License (Copyright (c) 2026 Sajit Magesh); the README
+  License section links to it.
+- HEAD and `origin/main` both point at `66d9ef4`.
+
+Outstanding:
+- The brief's 300–500 word written technical note (schema/normalisation
+  rationale, RBAC extensibility for a fourth role or nested organisations,
+  production-safety gaps) has NOT been written. It is the only remaining
+  assessment deliverable. Do not treat it as complete or as already covered by
+  the README — it is outstanding work.
+
 ---
 
 # 9. Current Task
 
-**Current milestone:** Milestone 7
+**Current milestone:** None — every implementation milestone is finished. The
+only remaining assessment deliverable is the 300–500 word written technical
+note required by the brief.
 
-**Current state:** Milestones 1–7 are complete. Milestones 1–5 committed as
-individual feature milestones. Milestone 6 (Docker + GitHub Actions) committed
-as 5 commits (`9c2c9fb` through `8e46364`): `Dockerfile`, `docker-compose.yml`
-(PostgreSQL 16 + Redis 7 + API), `.github/workflows/ci.yml` (lint + unit tests,
-Docker build, live smoke), `tests/test_live.py`, `.env.example`, and AGENTS.md
-docs. No application code, dependencies, migrations, or existing unit tests
-changed in M6. CI run 34573662242 passed all 3 jobs, including live-smoke
-against real PostgreSQL 16 + Redis 7. Milestone 8 (README, setup instructions,
-endpoint documentation, architecture explanation, 300–500 word technical note,
-production-readiness considerations) is next.
+**Current state:** Milestones 1–7 are COMPLETE and Milestone 8 is PARTIALLY
+COMPLETE. Milestones 1–5 were committed as individual feature commits
+(`7aeb3b9` scaffold through `e33d36f` reviews). Milestone 6 (Docker + GitHub
+Actions + live smoke test) was committed as 5 commits (`9c2c9fb` through
+`8e46364`): `Dockerfile`, `docker-compose.yml` (PostgreSQL 16 + Redis 7 + API),
+`.github/workflows/ci.yml` (lint + unit tests, Docker build, live smoke),
+`tests/test_live.py`, `.env.example`, and AGENTS.md docs. No application code,
+dependencies, migrations, or existing unit tests changed in M6; CI run
+34573662242 passed all 3 jobs, including live-smoke against real PostgreSQL 16
++ Redis 7. Milestone 7 (GitHub Actions verification) was recorded and pushed in
+`cd50e7c` (`chore(docs): record CI verification and update project state`).
+Milestone 8 documentation work committed README + MIT License in `66d9ef4`
+(`docs: add README and MIT license`), but the brief's 300–500 word written
+technical note has NOT been produced and remains the sole outstanding
+deliverable. HEAD and `origin/main` both point at `66d9ef4`.
 
 FastAPI learning has been completed through:
 - application creation
@@ -1520,7 +1552,26 @@ Format:
 - Verification: GitHub Actions CI run 34573662242 — `lint-and-test` (Ruff +
   53 passed, 1 skipped), `docker-build`, and `live-smoke` (1 passed against
   real PostgreSQL 16 + Redis 7) all succeeded; see the Verification Log.
-- Commit: `chore(docs): update AGENTS.md for Milestone 7 verification`.
+- Commit: `cd50e7c` (`chore(docs): record CI verification and update project
+  state`), pushed; see the git log.
+
+### 2026-09-11 Milestone 8 (partial) — README + MIT License committed
+
+- Changed: Added `README.md` (450 lines: overview, features, tech stack,
+  architecture, project structure, setup instructions, configuration, database
+  migrations, API/endpoint documentation, authentication & RBAC, Redis/review
+  summarisation, testing, Docker, CI, API docs links, production-readiness
+  considerations) and the MIT `LICENSE` (Copyright (c) 2026 Sajit Magesh); the
+  README License section links to it.
+- Reason: Delivered the documentation portion of Milestone 8 (running
+  application + setup documentation) as required by the brief.
+- Verification: README and LICENSE reviewed against the actual repository
+  state and git history (`66d9ef4` adds exactly these two files); no code,
+  test, migration, Docker, or CI changes. HEAD and `origin/main` both point
+  at `66d9ef4`.
+- Not yet done: the brief's 300–500 word written technical note remains
+  outstanding and is the only remaining assessment deliverable.
+- Commit: `66d9ef4` (`docs: add README and MIT license`), pushed; see the git log.
 
 ---
 
@@ -1528,17 +1579,26 @@ Format:
 
 This section must always reflect the immediate next actions.
 
-1. Create the Milestone 7 commit (`chore(docs): update AGENTS.md for Milestone
-   7 verification`) and push it so the repository records the milestone
-   completion. Milestones 6 and 7 are otherwise complete: M6 introduced the
-   Docker/CI/live-smoke work and M7 verified it via GitHub Actions run
-   34573662242 (all three jobs passed).
-2. Begin Milestone 8 (README, setup instructions, endpoint documentation,
-   architecture explanation, 300–500 word technical note, production-readiness
-   considerations). This is the final and remaining milestone.
-3. Docker is not installed locally and will not be installed by agents; all
-   container verification relies on the CI `docker-build` and `live-smoke` jobs.
-   If M8 changes application code or tests, re-run the local checks (ruff,
-   pytest) before committing.
+All implementation milestones (M1–M7) are complete, and the M8 README + MIT
+License work is committed at `66d9ef4` (HEAD = `origin/main`). The ONLY
+remaining assessment deliverable is the brief's 300–500 word written technical
+note (schema/normalisation rationale, RBAC extensibility for a fourth role or
+nested organisations, production-readiness gaps). It has not been written yet.
+
+Next actions:
+1. Write the 300–500 word written technical note required by the brief.
+2. Perform a final submission review of the repository and the note before
+   submitting the repository link and setup documentation to the placement
+   coordinator. Milestone 8 remains PARTIALLY COMPLETE until the note exists.
+
+Standing guidance (not pending work):
+1. Do not create further milestones — the assessment has no milestones after
+   M8.
+2. If any code or documentation change is made to the repository, follow the
+   Section 6 verification rules (ruff, pytest, and the live smoke test) before
+   committing, and keep this file updated.
+3. Docker is not installed locally and will not be installed by agents; any
+   container verification relies on the CI `docker-build` and `live-smoke`
+   jobs.
 
 Agents must update this section whenever the project state changes.
