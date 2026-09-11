@@ -114,3 +114,13 @@ def require_can_view_booking(booking: Booking, current_user: User) -> User:
             detail="You do not have access to this booking",
         )
     return current_user
+
+
+def require_booking_customer(booking: Booking, current_user: User) -> User:
+    """Return current_user when they are the booking's customer, else 403."""
+    if booking.customer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the customer who booked the slot can do this",
+        )
+    return current_user

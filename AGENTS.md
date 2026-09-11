@@ -408,7 +408,7 @@ justify it.
 
 ## Milestone 5 — Reviews + Redis
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Planned:
 - review functionality
@@ -416,6 +416,54 @@ Planned:
 - Redis queue
 - required queue payload
 - tests for Redis interaction
+
+Completed implementation:
+- `app/redis_client.py` reads `REDIS_URL` (default `redis://localhost:6379/0`),
+  builds one module-level `redis.Redis` client, and exposes `get_redis_client()`
+  as a FastAPI dependency so tests can override it (mirrors the `get_db`
+  pattern).
+- `redis>=5,<6` added to the runtime dependencies in `pyproject.toml`.
+- `app/security.py` gained `require_booking_customer(booking, current_user)`
+  (403 unless `booking.customer_id == current_user.id`). This is the helper M4
+  deliberately avoided as dead code; review authorization makes it genuinely
+  required.
+- `app/routers/reviews.py` exposes exactly two routes:
+  - `POST /reviews` — customer-only (`require_customer`); body
+    `{booking_id, rating, comment}`. Rejections, in order: booking not found
+    (404), booking not completed (409), caller not the booking's customer
+    (403), duplicate review (409). Creates the review and returns 201 with
+    `{id, booking_id, rating, comment}`.
+  - `POST /reviews/{id}/summarize` — customer-only and author-only. Loads the
+    review (404 when missing), enqueues
+    `json.dumps({"review_id": N})` onto the Redis list `review_summary_jobs`
+    via `rpush`, and returns 202 `{"status": "queued", "review_id": N}`.
+- `app/main.py` registers the reviews router.
+- `tests/test_reviews.py` (13 tests) proves valid creation, rejection in each
+  booking state (pending/confirmed/cancelled/nonexistent), another-customer and
+  provider 403s, duplicate rejection, rating 422, and exact queue key/payload
+  captures through a FakeRedis.
+- `tests/conftest.py` gained a hand-rolled `FakeRedis` class and a `fake_redis`
+  fixture that overrides `get_redis_client` via `app.dependency_overrides`.
+  `tests/__init__.py` was added so tests can import `tests.conftest`.
+- No Alembic migration: the M2 reviews table already contains every needed
+  column and constraint (unique booking_id enforces one review per booking,
+  rating check 1–5, comment NOT NULL, summary TEXT nullable for later use).
+
+Approved M5 decisions:
+- Reviews are created via `POST /reviews` with `booking_id` in the body, not a
+  nested `/bookings/{id}/review` route.
+- A non-completed booking returns 409, matching the M4 state-conflict
+  convention, and the state check runs before the author check — a pending or
+  cancelled booking is non-reviewable by anyone, so 409 is returned to any
+  caller without leaking authorship details.
+- Summarization is a synchronous stub: it pushes the exact payload
+  `{"review_id": N}` to the `review_summary_jobs` list and returns 202. There
+  is no worker, no AI, and no retry/visibility logic. `reviews.summary` stays
+  NULL (populated by a future summarisation worker if one is added).
+- Summarization is author-only (the customer who wrote the review), mirroring
+  the rule that controls who may create the review.
+
+Do not implement a background worker or real AI summarisation in this milestone.
 
 ---
 
@@ -462,13 +510,16 @@ Planned:
 
 # 9. Current Task
 
-**Current milestone:** Milestone 4
+**Current milestone:** Milestone 5
 
-**Current state:** Milestones 1–3 are implemented and reviewed. Milestone 4
-(booking CRUD + ownership RBAC) is implemented per the approved plan and
-verified with 40 passing tests. Direct PostgreSQL migration execution and
-true concurrent-transaction verification remain pending because no local
-PostgreSQL server is running. Reviews + Redis (M5) is the next milestone.
+**Current state:** Milestones 1–4 are committed. Milestone 5 (reviews + Redis
+summarisation queue) is implemented per the approved plan and verified with 53
+passing tests (40 prior + 13 review/Redis). The summarisation endpoint is a
+synchronous stub that pushes the exact payload onto `review_summary_jobs`;
+tests use a DI-overridden FakeRedis because no live Redis server is available.
+Live PostgreSQL migration execution, true concurrent-transaction verification,
+and a live Redis `rpush` all remain pending until the Docker/PostgreSQL/Redis
+stack arrives (M6). Milestone 6 (Docker + seed data) is next.
 
 FastAPI learning has been completed through:
 - application creation
@@ -488,8 +539,9 @@ FastAPI learning has been completed through:
 - password hashing and verification (passlib pbkdf2_sha256)
 - bearer-token authentication and FastAPI dependency injection
 - role-gated dependencies (admin/provider/customer)
-- object-level ownership checks (owner-or-admin, can-view)
+- object-level ownership checks (owner-or-admin, can-view, booking-customer)
 - atomic conditional UPDATE for concurrency-safe state transitions
+- dependency-overriding an external service (Redis) with a test double
 
 ---
 
@@ -726,6 +778,104 @@ DELETE as a soft cancel (status → cancelled).
 Soft-cancelling requires rules for who may cancel confirmed bookings and what
 happens to associated data; that is speculative for M4.
 
+### 2026-09-11 Milestone 5 Redis queue dependency
+
+**Decision:**
+Summarization is a synchronous stub: `POST /reviews/{id}/summarize` pushes
+`json.dumps({"review_id": N})` onto the Redis list `review_summary_jobs` via
+`rpush` and returns 202 `{"status": "queued", "review_id": N}`.
+
+**Reason:**
+The brief requires an "endpoint that triggers a review summarisation job" over
+a Redis queue with the required payload; it does not require a worker or real
+summarisation. The stub satisfies the letter of the requirement with the
+smallest correct implementation.
+
+**Alternative considered:**
+A real background worker consuming the queue and populating `reviews.summary`.
+
+**Why rejected:**
+A worker, AI provider, retry/visibility logic, and result persistence are all
+outside the M5 scope. Building them now would add unverifiable complexity
+without a live Redis server to test against.
+
+### 2026-09-11 Milestone 5 Redis test double
+
+**Decision:**
+Tests override the `get_redis_client()` dependency with a hand-rolled
+`FakeRedis` class (records `rpush` calls) via `app.dependency_overrides`. No
+`fakeredis` package and no live Redis are used.
+
+**Reason:**
+This mirrors the existing `get_db` DI-override pattern in `tests/conftest.py`
+and makes exact queue key/payload assertions trivial. `fakeredis` would add a
+dependency with no benefit at this scope, and a live Redis is unavailable.
+
+**Alternative considered:**
+Installing `fakeredis` or running a real Redis for tests.
+
+**Why rejected:**
+Only `rpush` is exercised; a full Redis semantic stand-in or real server is
+overkill and unverifiable locally.
+
+### 2026-09-11 Milestone 5 `require_booking_customer` added
+
+**Decision:**
+Add `require_booking_customer(booking, current_user)` to `app/security.py`
+(403 unless `booking.customer_id == current_user.id`). Used by both review
+routes.
+
+**Reason:**
+M4 deliberately omitted it as dead code. M5 makes it genuinely required:
+reviews may only be created by, and summarized by, the customer who booked the
+slot.
+
+**Alternative considered:**
+Inlining the check in the reviews router body.
+
+**Why rejected:**
+Keeping all authorization in `security.py` preserves the M3/M4 grouping
+convention and makes the ownership rule reusable and testable in isolation.
+
+### 2026-09-11 Milestone 5 review rejection ordering
+
+**Decision:**
+In `POST /reviews`, rejections run in this order: unknown booking (404),
+booking not completed (409), caller not the booking's customer (403),
+duplicate review (409).
+
+**Reason:**
+A pending, confirmed, or cancelled booking is non-reviewable by anyone,
+independent of authorship. Returning 409 before checking the author means no
+unowned booking can ever leak authorization information, and the state guard
+is provably reachable in tests (a pending slot has no customer against whom an
+author check could even run).
+
+**Alternative considered:**
+Author check before the state check.
+
+**Why rejected:**
+Pending slots have `customer_id IS NULL`, so the author check would 403
+-first and the completed-state rule could never be exercised for them. The
+state check must precede the author check by design.
+
+### 2026-09-11 Milestone 5 tests import from conftest
+
+**Decision:**
+`tests/__init__.py` makes `tests` a Python package so `tests/test_reviews.py`
+can `from tests.conftest import FakeRedis`.
+
+**Reason:**
+Each test module needs the `FakeRedis` class; pytest auto-loads `conftest.py`
+but plain Python imports require an importable package.
+
+**Alternative considered:**
+Duplicating `FakeRedis` inside `tests/test_reviews.py`.
+
+**Why rejected:**
+The fake and its `fake_redis` fixture belong beside the other test utilities
+in `conftest.py`; duplicating them would let them drift apart.
+
 ---
 
 # 11. Lessons Learned
@@ -806,6 +956,25 @@ dependencies, so their 403 fires before body validation.
 When testing authorization for an endpoint with a request body, send a VALID
 payload so the auth check is actually reached, or move the gate into a `Depends`
 if 403 must precede body validation.
+
+### 2026-09-11 Milestone 5 importing test helpers from conftest
+
+**What happened:**
+`POST /reviews/{id}/summarize` needed the `rpush` result asserted against a
+recording fake. The `FakeRedis` class lived in `conftest.py`; importing it with
+`from tests.conftest import FakeRedis` failed with
+`ModuleNotFoundError: No module named 'tests'`.
+
+**What we learned:**
+pytest auto-loads `conftest.py` as a fixture source, but `tests/` was not an
+importable Python package, so a plain `import tests.conftest` failed. Adding
+`tests/__init__.py` makes test modules importable and lets tests share helper
+classes defined in conftest without duplication.
+
+**What future agents should do:**
+When tests import helper classes from `conftest.py`, ensure `tests` is a
+package (`tests/__init__.py`). Otherwise define the helper inside the test file
+itself.
 
 ---
 
@@ -996,6 +1165,30 @@ simultaneous requests racing for one slot) — the atomic conditional UPDATE is
 implemented and behaviorally exercised on SQLite, but simultaneous
 multi-transaction interleaving requires a running PostgreSQL server (M6/Docker).
 
+### 2026-09-11 Milestone 5 verification
+
+**Command/check:**
+Ruff, pytest, FastAPI import + OpenAPI route listing, Alembic offline
+`upgrade head --sql`, and application-level review/Redis flows through the
+SQLite + FakeRedis test overrides.
+
+**Result:**
+Ruff passed; pytest collected 53 tests and reported `53 passed`
+(13 reviews, 18 bookings, 9 auth, 3 database, 1 root, 9 role-dependency);
+OpenAPI listed `/reviews` and `/reviews/{review_id}/summarize` alongside the
+existing routes; offline Alembic SQL still ran migrations `0001 → 0002 → 0003`
+with no new migration, confirming the chain is intact. Application-level tests
+proved review creation on completed bookings only, rejection for
+pending/confirmed/cancelled/nonexistent bookings, author and provider 403s,
+duplicate rejection (409), rating validation (422), and exact capture of the
+`rpush("review_summary_jobs", '{"review_id": N}')` call through FakeRedis.
+
+**Not verified:**
+Live Redis `rpush` against a real server, live review persistence on
+PostgreSQL, and concurrent duplicate-review handling across transactions — all
+require the M6 Docker/PostgreSQL/Redis stack. The queue stub, integration
+contract, and payload format are defined and exercised with test doubles.
+
 ---
 
 # 14. Change Log
@@ -1086,6 +1279,23 @@ Format:
   seven booking routes plus auth routes; offline Alembic SQL confirmed the
   `0001 → 0002 → 0003` chain. Live PostgreSQL run and true concurrent-transaction
   booking remain unverified (no local server; M6/Docker).
+- Commit: Created by the developer in the public repository history; see the git log.
+
+### 2026-09-11 Milestone 5 completed
+
+- Changed: Added `app/redis_client.py` (env-driven Redis client +
+  `get_redis_client()` DI dependency), `redis>=5,<6` dependency, the
+  `require_booking_customer` helper in `app/security.py`, `app/routers/reviews.py`
+  (`POST /reviews`, `POST /reviews/{id}/summarize`), reviews router registration
+  in `app/main.py`, and `tests/test_reviews.py` with a FakeRedis test double in
+  `tests/conftest.py`.
+- Reason: Implemented the assessment's review-only-completed-bookings rule and
+  the summarisation trigger over a Redis queue, with the exact payload pushed to
+  `review_summary_jobs` and no worker/AI (stub only).
+- Verification: Ruff passed; pytest passed (`53 passed`); OpenAPI listed
+  `/reviews` and `/reviews/{review_id}/summarize`; offline Alembic SQL confirmed
+  the unchanged `0001 → 0002 → 0003` chain (no schema change needed). Live Redis
+  `rpush` and live PostgreSQL persistence remain unverified (M6/Docker).
 - Commit: Not created; the developer will review and commit the work.
 
 ---
@@ -1094,16 +1304,15 @@ Format:
 
 This section must always reflect the immediate next actions.
 
-1. Create the developer-owned Milestone 4 commit. The M4 implementation is
-   complete and verified (40 passing tests). The developer must review and
+1. Create the developer-owned Milestone 5 commit. The M5 implementation is
+   complete and verified (53 passing tests). The developer must review and
    approve before creation; do not commit without explicit instruction.
-2. Begin Milestone 5 (Reviews + Redis) after the Milestone 4 commit: review
-   creation on completed bookings, the review summarisation endpoint that
-   enqueues a stub job, and the Redis queue backing it. Redis is not installed
-   locally, so the queue will be coded and tested without a live Redis
-   connection (M6 provides the real service).
-3. Milestones 1–4 are implemented. Live PostgreSQL/Redis verification of
-   migrations, concurrent slot booking, and the Redis queue remains pending
-   until Docker/PostgreSQL/Redis is available (Milestone 6).
+2. Begin Milestone 6 (Docker + Seed Data) after the M5 commit: Dockerfile,
+   Docker Compose (API + PostgreSQL + Redis services with health checks), and
+   seed data (admin/provider users, sample provider slots). This milestone is
+   the first place a live PostgreSQL/Redis stack exists; once it does,
+   live-verify M2 migrations, M4 concurrent booking, and M5 Redis `rpush`.
+3. Milestones 1–5 are implemented. Docker must be installed locally before M6
+   can run (it is currently unavailable on this machine).
 
 Agents must update this section whenever the project state changes.

@@ -8,6 +8,17 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
+from app.redis_client import get_redis_client
+
+
+class FakeRedis:
+    """Minimal in-memory Redis stand-in recording list pushes for tests."""
+
+    def __init__(self) -> None:
+        self.lists: dict[str, list[str]] = {}
+
+    def rpush(self, key: str, value: str) -> None:
+        self.lists.setdefault(key, []).append(value)
 
 
 @pytest.fixture()
@@ -39,3 +50,11 @@ def client(session_factory: sessionmaker[Session]) -> Generator[TestClient, None
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def fake_redis(client: TestClient) -> Generator[FakeRedis, None, None]:
+    fake = FakeRedis()
+    app.dependency_overrides[get_redis_client] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_redis_client, None)
