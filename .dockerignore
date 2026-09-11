@@ -1,0 +1,15 @@
+.git
+.venv
+*.env
+*.pdf
+*.qodo
+*.idea
+.idea/
+*.pytest_cache
+*.ruff_cache
+__pycache__
+*.py[cod]
+*.egg-info
+.github
+tests
+AGENTS.md
