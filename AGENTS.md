@@ -467,30 +467,60 @@ Do not implement a background worker or real AI summarisation in this milestone.
 
 ---
 
-## Milestone 6 — Docker + Seed Data
+## Milestone 6 — Docker + GitHub Actions + Live Smoke Test
 
-Status: NOT STARTED
+Status: COMPLETE (implementation)
 
 Planned:
 - Dockerfile
-- Docker Compose
-- API service
-- PostgreSQL service
-- Redis service
-- health checks
-- seed data
+- Docker Compose (API + PostgreSQL + Redis services with health checks)
+- CI workflow (lint + unit tests, Docker image build, live PostgreSQL/Redis smoke)
+- live smoke test gated by `RUN_LIVE=1`
+
+Implemented:
+- `Dockerfile` builds from `python:3.14-slim`, installs the project
+  non-editable (`pip install --no-cache-dir .`), and defaults to
+  `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+- `docker-compose.yml` runs `postgres:16-alpine` (named volume `pgdata`,
+  `pg_isready` healthcheck, port 5432), `redis:7-alpine` (`redis-cli ping`
+  healthcheck, port 6379), and the `api` service that waits for both healthy
+  (`depends_on: condition: service_healthy`) and runs
+  `alembic upgrade head && uvicorn ...` so migrations always run before the API
+  boots. The API also has an HTTP healthcheck on `GET /`.
+- `.github/workflows/ci.yml` has three jobs: `lint-and-test`
+  (Python 3.14, `pip install -e ".[dev]"`, `ruff check app tests alembic`,
+  `pytest tests -q`), `docker-build` (`docker build -t book-a-slot .`), and
+  `live-smoke` (PostgreSQL + Redis job services, then
+  `RUN_LIVE=1 DATABASE_URL=... REDIS_URL=... pytest tests/test_live.py -q`).
+- `tests/test_live.py` is skipped unless `RUN_LIVE=1`; when enabled it applies
+  `alembic upgrade head`, waits for PostgreSQL/Redis connectivity, then runs the
+  full flow against the real stack (provider slot → customer discovery → book →
+  double-book 409 → complete → review → duplicate 409 → author/provider 403s →
+  summarize → real Redis `LRANGE` assertion).
+- `.env.example` documents the local `DATABASE_URL` and `REDIS_URL`.
+
+Decisions:
+- Seed/demo data (`scripts/seed.py`) was explicitly skipped: the assessment brief
+  does not require it.
+- GitHub Actions was folded into Milestone 6 instead of a separate milestone so
+  CI is in place before the live stack is verified.
+- No application code, dependency, Alembic, `.env`, or unit-test changes were
+  needed; the existing env-driven `DATABASE_URL`/`REDIS_URL` design was already
+  Docker-ready. Docker not installed locally, so the stack was not run here (see
+  Verification Log); `docker-build` and `live-smoke` jobs provide CI proof once a
+  push happens.
 
 ---
 
 ## Milestone 7 — GitHub Actions
 
-Status: NOT STARTED
+Status: IN PROGRESS (CI workflow implemented inside Milestone 6)
 
 Planned:
-- CI workflow
-- lint
-- automated tests
-- verify workflow through an actual push
+- CI workflow (done as part of M6)
+- lint (done as part of M6)
+- automated tests (done as part of M6)
+- verify workflow through an actual push (pending; needs the M6 commit + push)
 
 ---
 
@@ -510,16 +540,19 @@ Planned:
 
 # 9. Current Task
 
-**Current milestone:** Milestone 5
+**Current milestone:** Milestone 6
 
-**Current state:** Milestones 1–4 are committed. Milestone 5 (reviews + Redis
-summarisation queue) is implemented per the approved plan and verified with 53
-passing tests (40 prior + 13 review/Redis). The summarisation endpoint is a
-synchronous stub that pushes the exact payload onto `review_summary_jobs`;
-tests use a DI-overridden FakeRedis because no live Redis server is available.
-Live PostgreSQL migration execution, true concurrent-transaction verification,
-and a live Redis `rpush` all remain pending until the Docker/PostgreSQL/Redis
-stack arrives (M6). Milestone 6 (Docker + seed data) is next.
+**Current state:** Milestones 1–5 are committed and pushed. Milestone 6
+(Docker + GitHub Actions + live smoke test) is implemented per the approved
+plan: `Dockerfile`, `docker-compose.yml` (PostgreSQL 16 + Redis 7 + API),
+`.github/workflows/ci.yml` (lint + unit tests, Docker build, live smoke),
+`tests/test_live.py` (skipped without `RUN_LIVE=1`), and `.env.example`. No
+application code, dependencies, migrations, or existing unit tests changed.
+Local verification (ruff, 53 unit tests + 1 skipped live test, Alembic offline
+SQL, OpenAPI listing, YAML validity) passed, but Docker was not installed
+locally, so `docker compose` and the live PostgreSQL/Redis checks remain
+unverified until a push runs the GitHub Actions `docker-build` and `live-smoke`
+jobs. Milestone 7 (GitHub Actions verification via a real push) is next.
 
 FastAPI learning has been completed through:
 - application creation
@@ -876,6 +909,94 @@ Duplicating `FakeRedis` inside `tests/test_reviews.py`.
 The fake and its `fake_redis` fixture belong beside the other test utilities
 in `conftest.py`; duplicating them would let them drift apart.
 
+### 2026-09-11 Milestone 6 Docker design
+
+**Decision:**
+`docker-compose.yml` runs `postgres:16-alpine` and `redis:7-alpine` with health
+checks, plus an `api` service built from the repo `Dockerfile` that waits for
+both healthy (`depends_on: condition: service_healthy`) and runs
+`alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+Service-internal `DATABASE_URL`/`REDIS_URL` are set in the compose file; a
+named `pgdata` volume persists PostgreSQL data; Redis has no volume.
+
+**Reason:**
+Migrations must run before the API boots, and the API must not start until
+PostgreSQL/Redis are ready. The image tags are pinned to major versions for
+reproducibility, and the API image uses the same env-driven config the app
+already has, so no application code changes are needed.
+
+**Alternative considered:**
+Adding an entrypoint script that waits for readiness inside the container.
+
+**Why rejected:**
+Compose `condition: service_healthy` already orders startup correctly; an extra
+entrypoint/script adds Docker-specific wait logic that `pg_isready`/`redis-cli`
+health checks already cover.
+
+### 2026-09-11 Milestone 6 CI scope
+
+**Decision:**
+`.github/workflows/ci.yml` has three jobs: `lint-and-test` (ruff + full pytest),
+`docker-build` (`docker build -t book-a-slot .`), and `live-smoke`
+(PostgreSQL + Redis job services, then the real-stack
+`tests/test_live.py` with `RUN_LIVE=1`). Trigger: push to `main` and PRs.
+
+**Reason:**
+The developer requires the mandatory lint + unit-test job plus actual Docker
+build and live PostgreSQL/Redis verification. Without a local Docker install,
+the `docker-build` and `live-smoke` jobs are the only place the live stack can
+be proven.
+
+**Alternative considered:**
+Lint/test-only workflow, or running `docker compose` inside CI.
+
+**Why rejected:**
+Testing the compose startup command inside CI adds long job times and doesn't
+prove the API image builds; `docker-build` + `live-smoke` cover build and
+runtime separately and intentionally.
+
+### 2026-09-11 Milestone 6 live smoke test
+
+**Decision:**
+`tests/test_live.py` is skipped unless `RUN_LIVE=1`. When enabled it applies
+`alembic upgrade head` (Alembic command API), waits up to 60s for PostgreSQL
+and Redis connectivity, then runs the whole flow against the real stack and
+asserts the Redis payload by `LRANGE review_summary_jobs` with
+`json.loads(value) == {"review_id": N}`.
+
+**Reason:**
+The same test file serves both Docker-Compose executions and (fastest)
+GitHub Actions job services, keeping `RUN_LIVE` as the single gate. Unique
+emails per run let repeat executions coexist in one database. The module-level
+`client` fixture shadows `conftest.py`'s DI-overridden `client` so the real
+engine and real Redis client are used.
+
+**Alternative considered:**
+A standalone shell script driven end-to-end through `curl`.
+
+**Why rejected:**
+A pytest test is lintable, runs in the same job as install, and reuses the
+existing `app` import and models cleanly; a curl script would duplicate request
+logic and add a second verification tool.
+
+### 2026-09-11 Milestone 6 seed data skipped
+
+**Decision:**
+No `scripts/seed.py` and no demo/admin seed data in M6.
+
+**Reason:**
+The assessment brief does not require seed data; admin/provider users can be
+created directly in PostgreSQL or via signup-based flows. Adding it would only
+delay the milestone with unverified surface area.
+
+**Alternative considered:**
+An idempotent seed script creating an admin, a provider, and sample slots.
+
+**Why rejected:**
+The brief is silent on it, and every added feature must be explainable. It can
+be added later if a concrete requirement appears (e.g. demo credentials in the
+README).
+
 ---
 
 # 11. Lessons Learned
@@ -1189,6 +1310,30 @@ PostgreSQL, and concurrent duplicate-review handling across transactions — all
 require the M6 Docker/PostgreSQL/Redis stack. The queue stub, integration
 contract, and payload format are defined and exercised with test doubles.
 
+### 2026-09-11 Milestone 6 verification
+
+**Command/check:**
+Ruff, full pytest, Alembic offline `upgrade head --sql`, FastAPI import +
+OpenAPI route listing, and YAML validity of `docker-compose.yml` and
+`.github/workflows/ci.yml` (Ruby `YAML.load_file`). Also confirmed the new
+files are git-ignored appropriately and that `pyproject.toml`, `app/*`,
+`alembic/*`, `.env`, and existing unit tests were not modified.
+
+**Result:**
+Ruff passed; pytest collected 54 tests (53 unit + 1 live) and reported
+`53 passed, 1 skipped` (the skipped test is `tests/test_live.py`, gated by
+`RUN_LIVE=1`); offline Alembic SQL still ran migrations `0001 → 0002 → 0003`
+with no new migration; OpenAPI was unchanged; both YAML files parsed as valid
+YAML, and the compose model has exactly `db`, `redis`, `api` services plus the
+`pgdata` volume.
+
+**Not verified (Docker unavailable locally):**
+`docker build`, `docker compose build/up`, the compose healthcheck ordering,
+`alembic upgrade head` against the real PostgreSQL container, live end-to-end
+flows, real Redis `LRANGE`, and the GitHub Actions jobs. These are exactly the
+checks the `docker-build` and `live-smoke` CI jobs will run after the M6 commit
+is pushed.
+
 ---
 
 # 14. Change Log
@@ -1296,6 +1441,30 @@ Format:
   `/reviews` and `/reviews/{review_id}/summarize`; offline Alembic SQL confirmed
   the unchanged `0001 → 0002 → 0003` chain (no schema change needed). Live Redis
   `rpush` and live PostgreSQL persistence remain unverified (M6/Docker).
+- Commit: Created by the developer in the public repository history
+  (`e33d36f`, `feat(reviews): add reviews and Redis summarisation queue`) and
+  pushed; see the git log.
+
+### 2026-09-11 Milestone 6 completed
+
+- Changed: Added `Dockerfile` (python:3.14-slim, non-editable install, uvicorn
+  default command), `.dockerignore`, `docker-compose.yml` (PostgreSQL 16 +
+  Redis 7 + API with health checks, `pgdata` volume, migration-before-boot
+  command), `.env.example`, `.github/workflows/ci.yml` (lint-and-test,
+  docker-build, live-smoke jobs), and `tests/test_live.py` (skipped unless
+  `RUN_LIVE=1`). Updated `AGENTS.md` (M6/M7 status, decisions, verification,
+  change log, next steps) and corrected the stale M5 commit record.
+- Reason: Implemented the assessment's "docker compose with API + PostgreSQL +
+  Redis" and "GitHub Actions running lint and tests" requirements, plus live
+  real-stack verification through the CI smoke job, without touching any
+  application code, dependencies, `.env`, or existing tests. Seed data was
+  deliberately skipped (not required by the brief).
+- Verification: Ruff passed; pytest collected 54 tests and reported
+  `53 passed, 1 skipped` (live test gated by `RUN_LIVE=1`); offline Alembic SQL
+  unchanged (`0001 → 0002 → 0003`); OpenAPI unchanged; compose and workflow YAML
+  parse cleanly. Docker was not installed locally, so the image build, compose
+  startup, and live PostgreSQL/Redis flows remain unverified until a push runs
+  the CI `docker-build` and `live-smoke` jobs.
 - Commit: Not created; the developer will review and commit the work.
 
 ---
@@ -1304,15 +1473,21 @@ Format:
 
 This section must always reflect the immediate next actions.
 
-1. Create the developer-owned Milestone 5 commit. The M5 implementation is
-   complete and verified (53 passing tests). The developer must review and
-   approve before creation; do not commit without explicit instruction.
-2. Begin Milestone 6 (Docker + Seed Data) after the M5 commit: Dockerfile,
-   Docker Compose (API + PostgreSQL + Redis services with health checks), and
-   seed data (admin/provider users, sample provider slots). This milestone is
-   the first place a live PostgreSQL/Redis stack exists; once it does,
-   live-verify M2 migrations, M4 concurrent booking, and M5 Redis `rpush`.
-3. Milestones 1–5 are implemented. Docker must be installed locally before M6
-   can run (it is currently unavailable on this machine).
+1. Create the developer-owned Milestone 6 commit set (see the proposed breakdown
+   in the M6 report): Dockerfile/`.dockerignore`, `docker-compose.yml` +
+   `.env.example`, `.github/workflows/ci.yml`, `tests/test_live.py`, and the
+   AGENTS.md docs update. The M6 implementation is complete and locally
+   verified (53 unit tests pass + live test skipped); Docker execution is
+   NOT possible locally. Do not commit without explicit instruction.
+2. After the M6 commit is pushed, watch the GitHub Actions run: the
+   `lint-and-test`, `docker-build`, and `live-smoke` jobs are the only place the
+   Docker image, compose-equivalent stack, live PostgreSQL migrations, real
+   Redis `rpush`/`LRANGE`, and end-to-end flow can be proven. This completes
+   Milestone 7 (GitHub Actions verification via a real push).
+3. Begin Milestone 8 (README, setup instructions, endpoint documentation,
+   architecture explanation, 300–500 word technical note, production-readiness
+   considerations) after CI is green.
+4. Docker was not installed locally and will not be installed by agents; all
+   container verification relies on the CI `docker-build` and `live-smoke` jobs.
 
 Agents must update this section whenever the project state changes.
