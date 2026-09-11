@@ -506,21 +506,34 @@ Decisions:
   CI is in place before the live stack is verified.
 - No application code, dependency, Alembic, `.env`, or unit-test changes were
   needed; the existing env-driven `DATABASE_URL`/`REDIS_URL` design was already
-  Docker-ready. Docker not installed locally, so the stack was not run here (see
-  Verification Log); `docker-build` and `live-smoke` jobs provide CI proof once a
-  push happens.
+  Docker-ready. Docker was not installed locally, so the stack was not run here
+  (see Verification Log); `docker-build` and `live-smoke` jobs provided the CI
+  proof in run 34573662242 (all three jobs passed).
 
 ---
 
 ## Milestone 7 — GitHub Actions
 
-Status: IN PROGRESS (CI workflow implemented inside Milestone 6)
+Status: COMPLETE
 
 Planned:
 - CI workflow (done as part of M6)
 - lint (done as part of M6)
 - automated tests (done as part of M6)
-- verify workflow through an actual push (pending; needs the M6 commit + push)
+- verify workflow through an actual push
+
+Verification (CI run 34573662242, commit `8e46364`):
+- `lint-and-test`: passed — Ruff clean, 53 tests passed, 1 skipped (live test
+  gated by `RUN_LIVE=1`).
+- `docker-build`: passed — `docker build -t book-a-slot .` succeeded.
+- `live-smoke`: passed — 1 test passed against real PostgreSQL 16 + Redis 7
+  services on GitHub Actions runners. Full flow exercised: `alembic upgrade
+  head`, provider slot creation, customer discovery, booking, double-book 409,
+  completion, review creation, duplicate review 409, author/provider 403s,
+  summarisation queue, real Redis `LRANGE` assertion.
+
+This is the first time the application has been proven against live PostgreSQL
+and Redis.
 
 ---
 
@@ -540,19 +553,18 @@ Planned:
 
 # 9. Current Task
 
-**Current milestone:** Milestone 6
+**Current milestone:** Milestone 7
 
-**Current state:** Milestones 1–5 are committed and pushed. Milestone 6
-(Docker + GitHub Actions + live smoke test) is implemented per the approved
-plan: `Dockerfile`, `docker-compose.yml` (PostgreSQL 16 + Redis 7 + API),
-`.github/workflows/ci.yml` (lint + unit tests, Docker build, live smoke),
-`tests/test_live.py` (skipped without `RUN_LIVE=1`), and `.env.example`. No
-application code, dependencies, migrations, or existing unit tests changed.
-Local verification (ruff, 53 unit tests + 1 skipped live test, Alembic offline
-SQL, OpenAPI listing, YAML validity) passed, but Docker was not installed
-locally, so `docker compose` and the live PostgreSQL/Redis checks remain
-unverified until a push runs the GitHub Actions `docker-build` and `live-smoke`
-jobs. Milestone 7 (GitHub Actions verification via a real push) is next.
+**Current state:** Milestones 1–7 are complete. Milestones 1–5 committed as
+individual feature milestones. Milestone 6 (Docker + GitHub Actions) committed
+as 5 commits (`9c2c9fb` through `8e46364`): `Dockerfile`, `docker-compose.yml`
+(PostgreSQL 16 + Redis 7 + API), `.github/workflows/ci.yml` (lint + unit tests,
+Docker build, live smoke), `tests/test_live.py`, `.env.example`, and AGENTS.md
+docs. No application code, dependencies, migrations, or existing unit tests
+changed in M6. CI run 34573662242 passed all 3 jobs, including live-smoke
+against real PostgreSQL 16 + Redis 7. Milestone 8 (README, setup instructions,
+endpoint documentation, architecture explanation, 300–500 word technical note,
+production-readiness considerations) is next.
 
 FastAPI learning has been completed through:
 - application creation
@@ -1331,8 +1343,30 @@ YAML, and the compose model has exactly `db`, `redis`, `api` services plus the
 `docker build`, `docker compose build/up`, the compose healthcheck ordering,
 `alembic upgrade head` against the real PostgreSQL container, live end-to-end
 flows, real Redis `LRANGE`, and the GitHub Actions jobs. These are exactly the
-checks the `docker-build` and `live-smoke` CI jobs will run after the M6 commit
-is pushed.
+checks the `docker-build` and `live-smoke` CI jobs run; all passed in CI run
+34573662242 (see the Milestone 7 verification entry below).
+
+### 2026-09-11 Milestone 7 verification
+
+**Command/check:**
+GitHub Actions CI run 34573662242 (commit `8e46364`, branch `main`).
+Three jobs: `lint-and-test`, `docker-build`, `live-smoke`. Verified via
+`gh run view 34573662242 --json jobs` and log inspection.
+
+**Result:**
+- `lint-and-test`: passed — Ruff clean (`ruff check app tests alembic`), 53
+  tests passed, 1 skipped (`tests/test_live.py` gated by `RUN_LIVE=1`), 2
+  warnings (StarletteDeprecationWarning, anyio deprecation — both harmless).
+- `docker-build`: passed — `docker build -t book-a-slot .` completed in 23s.
+- `live-smoke`: passed — 1 test passed in 0.64s against real PostgreSQL 16
+  + Redis 7 GitHub Actions service containers. Full end-to-end flow exercised:
+  `alembic upgrade head` against real PostgreSQL, provider slot creation,
+  customer discovery, booking, double-book 409, completion, review creation,
+  duplicate review 409, author/provider 403s, summarisation queue, real Redis
+  `LRANGE review_summary_jobs` assertion.
+
+This is the first time the application has been proven against live PostgreSQL
+and Redis.
 
 ---
 
@@ -1465,7 +1499,28 @@ Format:
   parse cleanly. Docker was not installed locally, so the image build, compose
   startup, and live PostgreSQL/Redis flows remain unverified until a push runs
   the CI `docker-build` and `live-smoke` jobs.
-- Commit: Not created; the developer will review and commit the work.
+- Commit: Created by the developer in the public repository history as 5
+  sequential commits: `9c2c9fb` (feat(docker): add Dockerfile and .dockerignore
+  for API image), `e83ca16` (feat(compose): add docker-compose.yml and
+  .env.example for local stack), `28cc00f` (feat(ci): add GitHub Actions
+  workflow for lint, tests, Docker build, and live smoke), `17240d3`
+  (test(live): add live PostgreSQL and Redis end-to-end smoke test), and
+  `8e46364` (chore(docs): update AGENTS.md for Milestone 6).
+
+### 2026-09-11 Milestone 7 completed
+
+- Changed: Updated `AGENTS.md` to mark Milestone 7 (GitHub Actions
+  verification) complete with CI evidence, fixed the stale M6 change-log commit
+  reference, and recorded the M6/M7 verification and change-log entries. No
+  application, test, dependency, migration, or infrastructure files changed.
+- Reason: Milestone 7 is a verification milestone: the M6 CI workflow had
+  already run on the pushed commits and all three jobs passed. The remaining
+  work was recording that proof in `AGENTS.md` and correcting stale milestone
+  references.
+- Verification: GitHub Actions CI run 34573662242 — `lint-and-test` (Ruff +
+  53 passed, 1 skipped), `docker-build`, and `live-smoke` (1 passed against
+  real PostgreSQL 16 + Redis 7) all succeeded; see the Verification Log.
+- Commit: `chore(docs): update AGENTS.md for Milestone 7 verification`.
 
 ---
 
@@ -1473,21 +1528,17 @@ Format:
 
 This section must always reflect the immediate next actions.
 
-1. Create the developer-owned Milestone 6 commit set (see the proposed breakdown
-   in the M6 report): Dockerfile/`.dockerignore`, `docker-compose.yml` +
-   `.env.example`, `.github/workflows/ci.yml`, `tests/test_live.py`, and the
-   AGENTS.md docs update. The M6 implementation is complete and locally
-   verified (53 unit tests pass + live test skipped); Docker execution is
-   NOT possible locally. Do not commit without explicit instruction.
-2. After the M6 commit is pushed, watch the GitHub Actions run: the
-   `lint-and-test`, `docker-build`, and `live-smoke` jobs are the only place the
-   Docker image, compose-equivalent stack, live PostgreSQL migrations, real
-   Redis `rpush`/`LRANGE`, and end-to-end flow can be proven. This completes
-   Milestone 7 (GitHub Actions verification via a real push).
-3. Begin Milestone 8 (README, setup instructions, endpoint documentation,
+1. Create the Milestone 7 commit (`chore(docs): update AGENTS.md for Milestone
+   7 verification`) and push it so the repository records the milestone
+   completion. Milestones 6 and 7 are otherwise complete: M6 introduced the
+   Docker/CI/live-smoke work and M7 verified it via GitHub Actions run
+   34573662242 (all three jobs passed).
+2. Begin Milestone 8 (README, setup instructions, endpoint documentation,
    architecture explanation, 300–500 word technical note, production-readiness
-   considerations) after CI is green.
-4. Docker was not installed locally and will not be installed by agents; all
+   considerations). This is the final and remaining milestone.
+3. Docker is not installed locally and will not be installed by agents; all
    container verification relies on the CI `docker-build` and `live-smoke` jobs.
+   If M8 changes application code or tests, re-run the local checks (ruff,
+   pytest) before committing.
 
 Agents must update this section whenever the project state changes.
