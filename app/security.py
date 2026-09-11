@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User
+from app.models import Booking, User
 from app.models.enums import UserRole
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -73,5 +73,44 @@ def require_customer(current_user: User = Depends(get_current_user)) -> User:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Customer role required",
+        )
+    return current_user
+
+
+def get_booking_or_404(booking_id: int, db: Session) -> Booking:
+    """Return the booking with the given id, or raise 404 when it does not exist."""
+    booking = db.get(Booking, booking_id)
+    if booking is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Booking not found",
+        )
+    return booking
+
+
+def require_owner_or_admin(booking: Booking, current_user: User) -> User:
+    """Return current_user when they are the booking's provider or admin, else 403."""
+    if current_user.role != UserRole.ADMIN and booking.provider_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this booking",
+        )
+    return current_user
+
+
+def require_can_view_booking(booking: Booking, current_user: User) -> User:
+    """Return current_user when they may read this booking, else 403.
+
+    Admin may view everything; providers may view their own slots; customers
+    may view only bookings they hold.
+    """
+    if (
+        current_user.role != UserRole.ADMIN
+        and booking.provider_id != current_user.id
+        and booking.customer_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this booking",
         )
     return current_user

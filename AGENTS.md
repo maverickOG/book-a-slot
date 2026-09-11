@@ -345,7 +345,7 @@ justify it.
 
 ## Milestone 4 — Booking CRUD
 
-Status: NOT STARTED
+Status: COMPLETE
 
 Planned:
 - booking creation
@@ -354,6 +354,55 @@ Planned:
 - booking deletion
 - role-based filtering
 - object-level ownership checks
+
+Completed implementation:
+- `app/routers/bookings.py` exposes the seven booking routes:
+  `POST /bookings`, `GET /bookings`, `GET /bookings/{id}`,
+  `PUT /bookings/{id}`, `DELETE /bookings/{id}`, `POST /bookings/{id}/book`,
+  `POST /bookings/{id}/complete`.
+- `GET /bookings` is role-filtered: admin sees all, provider sees own slots,
+  customer sees own bookings by default. Customer support `?status=pending`,
+  which returns only genuinely available slots (customer_id NULL, status
+  pending) so customers can discover slots to book without seeing any other
+  customer's booking.
+- `app/security.py` gained three pure helpers:
+  `get_booking_or_404`, `require_owner_or_admin`, `require_can_view_booking`.
+  There is intentionally no `require_booking_customer` — M4 has no
+  customer-mutation endpoint, so it would be dead code.
+- Slot creation is provider-only (`require_provider`); a slot starts
+  `pending` with `customer_id NULL`.
+- Booking happens through an atomic conditional UPDATE
+  (`WHERE status = 'pending' AND customer_id IS NULL`), so two customers
+  cannot claim the same slot through a check-then-update race. Completing
+  uses the same conditional-UPDATE pattern
+  (`WHERE status = 'confirmed' AND customer_id IS NOT NULL`).
+- PUT/DELETE only operate on available (pending, unbooked) slots, 409
+  otherwise. Complete only transitions confirmed → completed, 409 otherwise.
+- Tests: `tests/test_bookings.py` (18 tests) proves creation, role isolation,
+  availability, bookings, completions, forbidden access, invalid IDs, time
+  ordering, and state guards.
+
+Approved M4 decisions:
+- Booking is matched to availability atomically with a conditional UPDATE
+  (`status = 'pending' AND customer_id IS NULL` → confirmed); no SELECT FOR
+  UPDATE is needed. The same conditional-UPDATE pattern covers completion.
+  This is the smallest correct concurrency fix and behaves correctly on both
+  PostgreSQL (row lock + WHERE re-evaluation under READ COMMITTED) and SQLite
+  (serialized single-writer).
+- Customers discover available slots through `GET /bookings?status=pending`
+  (returns only pending slots with customer_id NULL). This satisfies the
+  assessment's "customer can read only their own" rule while still letting
+  customers find slots to book, without a separate discovery endpoint.
+- `cancelled` booking status is intentionally not set by any M4 endpoint.
+  DELETE physically removes open (pending, unbooked) slots only; confirmed and
+  completed bookings cannot be deleted (409).
+- PUT accepts only `starts_at` and `ends_at`; status/provider/customer are
+  never user-settable. PUT/DELETE are restricted to pending, unbooked slots.
+- There is no migration for M4: the Milestone 2 schema already contains every
+  column, constraint, index, and enum value the booking flow needs.
+
+Do not implement a complex middleware/policy system unless the actual requirements
+justify it.
 
 ---
 
@@ -413,13 +462,13 @@ Planned:
 
 # 9. Current Task
 
-**Current milestone:** Milestone 3
+**Current milestone:** Milestone 4
 
-**Current state:** Milestones 1 and 2 are implemented and reviewed. Milestone 3
-(authentication + RBAC infrastructure) is implemented, hardened after a strict
-code review, and verified with 22 passing tests. Direct PostgreSQL migration
-verification remains pending because no local PostgreSQL server is running.
-Booking CRUD (M4) is the next milestone.
+**Current state:** Milestones 1–3 are implemented and reviewed. Milestone 4
+(booking CRUD + ownership RBAC) is implemented per the approved plan and
+verified with 40 passing tests. Direct PostgreSQL migration execution and
+true concurrent-transaction verification remain pending because no local
+PostgreSQL server is running. Reviews + Redis (M5) is the next milestone.
 
 FastAPI learning has been completed through:
 - application creation
@@ -439,6 +488,8 @@ FastAPI learning has been completed through:
 - password hashing and verification (passlib pbkdf2_sha256)
 - bearer-token authentication and FastAPI dependency injection
 - role-gated dependencies (admin/provider/customer)
+- object-level ownership checks (owner-or-admin, can-view)
+- atomic conditional UPDATE for concurrency-safe state transitions
 
 ---
 
@@ -612,6 +663,69 @@ Running a real PostgreSQL container for tests.
 Docker is not installed on this machine; CI (Milestone 7) can use the compose
 stack. The application code never references SQLite.
 
+### 2026-09-11 Milestone 4 ownership helpers
+
+**Decision:**
+Add exactly three pure helpers to `app/security.py`:
+`get_booking_or_404`, `require_owner_or_admin`, `require_can_view_booking`.
+They are called explicitly in the endpoint body after a `Depends`-provided
+`get_current_user` or `require_customer`; none of them is itself a `Depends`.
+
+**Reason:**
+The endpoints need object-level authorization after the 404 (does the object
+exist?) check. Calling plain functions with `(booking, current_user)` is the
+smallest readable structure and avoids path-param-derived dependency plumbing.
+Keeping them in `security.py` groups all authorization in one place.
+
+**Alternative considered:**
+`require_booking_customer` (a helper enforcing `booking.customer_id == user`)
+and slot availability as a FastAPI dependency.
+
+**Why rejected:**
+M4 has no customer-mutation endpoint, so `require_booking_customer` would be
+dead code. Expressing "is this slot still bookable?" as a dependency is another
+layer that duplicates the atomic UPDATE's own `WHERE` guard.
+
+### 2026-09-11 Milestone 4 slot discovery
+
+**Decision:**
+Customers find bookable slots through `GET /bookings?status=pending`, which for
+customers returns only slots with `status = 'pending' AND customer_id IS NULL`.
+The default `GET /bookings` still returns only the customer's own bookings.
+
+**Reason:**
+The assessment requires "a customer can only read their own bookings", but a
+customer must still be able to find slots to book. Because an available slot has
+`customer_id IS NULL`, a pending-only filter can never expose another customer's
+booking, so it does not violate the read rule.
+
+**Alternative considered:**
+A separate discovery endpoint or an `available=true` query flag.
+
+**Why rejected:**
+The assessment lists only CRUD plus book/complete. A query filter is the
+smallest change that satisfies both requirements without new routes.
+
+### 2026-09-11 Milestone 4 cancel/delete semantics
+
+**Decision:**
+No M4 endpoint sets `status = 'cancelled'`. DELETE physically removes a slot
+only while it is pending and unbooked; confirmed and completed bookings cannot
+be deleted (409).
+
+**Reason:**
+The status enum includes `cancelled`, but the assessment specifies CRUD plus
+book/complete, not cancellation. Hard-deleting open slots is the simplest
+interpretation of DELETE and avoids inventing a cancellation flow (e.g. whether
+a customer or provider authorizes it, or what happens to a confirmed booking).
+
+**Alternative considered:**
+DELETE as a soft cancel (status → cancelled).
+
+**Why rejected:**
+Soft-cancelling requires rules for who may cancel confirmed bookings and what
+happens to associated data; that is speculative for M4.
+
 ---
 
 # 11. Lessons Learned
@@ -674,6 +788,24 @@ bcrypt 5.0 rejects. passlib's own `pbkdf2_sha256` scheme is pure Python (stdlib
 Verify hashing libraries actually hash/verify on the current Python before adding
 them to `pyproject.toml`. Prefer `passlib`'s `pbkdf2_sha256` on Python 3.14; do
 not reach for `passlib[bcrypt]`.
+
+### 2026-09-11 Milestone 4 FastAPI validation order
+
+**What happened:**
+A test that asserted a customer's unauthorized `PUT /bookings/{id}` with an empty
+body returns 403 instead received 422.
+
+**What we learned:**
+FastAPI validates and builds the request body params *before* the endpoint
+function body runs. When an authorization gate is a plain function call inside
+the endpoint (not a `Depends`), a malformed body produces 422 before the 403 can
+be raised. In contrast, `require_provider`/`require_customer` are `Depends`
+dependencies, so their 403 fires before body validation.
+
+**What future agents should do:**
+When testing authorization for an endpoint with a request body, send a VALID
+payload so the auth check is actually reached, or move the gate into a `Depends`
+if 403 must precede body validation.
 
 ---
 
@@ -840,6 +972,30 @@ None (→ 401) for missing/`Basic`/empty-token headers and tolerates lowercase
 so signup cannot self-assign a role. The exact `/auth/me` key set `{id, email,
 role}` is now asserted, confirming `password_hash` and `token` are not exposed.
 
+### 2026-09-11 Milestone 4 verification
+
+**Command/check:**
+Ruff, pytest, FastAPI import + OpenAPI route listing, Alembic offline
+`upgrade head --sql`, and application-level booking flows through the SQLite
+test override.
+
+**Result:**
+Ruff passed; pytest collected 40 tests and reported `40 passed`
+(18 bookings, 9 auth, 3 database, 1 root, 9 role-dependency);
+OpenAPI listed `/bookings`, `/bookings/{booking_id}`,
+`/bookings/{booking_id}/book`, `/bookings/{booking_id}/complete` plus the
+existing auth routes; offline Alembic SQL ran migrations `0001 → 0002 → 0003`
+with no new migration, confirming the chain is intact. Application-level tests
+proved provider slot creation, customer booking, double-booking rejection (409),
+provider/customer/admin isolation, 403/404/422 behaviors, PUT/DELETE guards, and
+confirmed → completed transitions.
+
+**Not verified:**
+Live PostgreSQL migration execution; true concurrent-transaction booking (two
+simultaneous requests racing for one slot) — the atomic conditional UPDATE is
+implemented and behaviorally exercised on SQLite, but simultaneous
+multi-transaction interleaving requires a running PostgreSQL server (M6/Docker).
+
 ---
 
 # 14. Change Log
@@ -875,7 +1031,7 @@ Format:
   passed, and PostgreSQL-targeted offline migration SQL was inspected. Live
   PostgreSQL migration verification remains pending because no local server was
   available.
-- Commit: Not created; the developer will review and commit the work.
+- Commit: Created by the developer in the public repository history; see the git log.
 
 ### 2026-09-11 Milestone 2 schema fix — customer_id nullable + Review.summary
 
@@ -888,7 +1044,7 @@ Format:
 - Verification: Ruff passed, pytest passed (`4 passed`), offline Alembic upgrade
   SQL verified (ALTER COLUMN DROP NOT NULL + ADD COLUMN), downgrade SQL verified
   (DROP COLUMN + ALTER COLUMN SET NOT NULL).
-- Commit: Not created; the developer will review and commit the work.
+- Commit: Created by the developer in the public repository history; see the git log.
 
 ### 2026-09-11 Milestone 3 completed
 
@@ -902,7 +1058,7 @@ Format:
 - Verification: Ruff passed; pytest passed (`21 passed`); OpenAPI listed the three
   auth routes; offline Alembic upgrade/downgrade SQL for `20260911_0003` verified.
   Live PostgreSQL migration execution remains pending.
-- Commit: Not created; the developer will review and commit the work.
+- Commit: Created by the developer in the public repository history; see the git log.
 
 ### 2026-09-11 Milestone 3 review fixes
 
@@ -915,6 +1071,21 @@ Format:
   the role-escalation guard and /auth/me non-leak guarantee were genuine M3
   security requirements that were untested.
 - Verification: Ruff passed; pytest passed (`22 passed`).
+- Commit: Created by the developer in the public repository history; see the git log.
+
+### 2026-09-11 Milestone 4 completed
+
+- Changed: Added `app/routers/bookings.py` with the seven booking routes,
+  three ownership helpers in `app/security.py` (`get_booking_or_404`,
+  `require_owner_or_admin`, `require_can_view_booking`), `app/main.py` router
+  registration, and `tests/test_bookings.py`.
+- Reason: Implemented the assessment's booking CRUD, role-based filtering,
+  object-level ownership checks, and concurrency-safe booking/complete with no
+  schema change (the M2 bookings table already supported the full flow).
+- Verification: Ruff passed; pytest passed (`40 passed`); OpenAPI listed the
+  seven booking routes plus auth routes; offline Alembic SQL confirmed the
+  `0001 → 0002 → 0003` chain. Live PostgreSQL run and true concurrent-transaction
+  booking remain unverified (no local server; M6/Docker).
 - Commit: Not created; the developer will review and commit the work.
 
 ---
@@ -923,15 +1094,16 @@ Format:
 
 This section must always reflect the immediate next actions.
 
-1. Create the developer-owned Milestone 2 and Milestone 3 commits. The M3 review
-   is complete and no critical issues were found; the three SHOULD FIX items are
-   applied, verified (22 passing tests), and recorded below. The developer must
-   approve before creation.
-2. Begin Milestone 4 (Booking CRUD) after the Milestone 3 commits; it will consume
-   `get_current_user` and add booking ownership dependencies
-   (`require_owner_or_admin`, `require_booking_customer`).
-3. Milestones 1–3 are implemented. Live PostgreSQL/Redis verification of
-   migrations and auth flows remains pending until Docker/PostgreSQL is
-   available (Milestone 6).
+1. Create the developer-owned Milestone 4 commit. The M4 implementation is
+   complete and verified (40 passing tests). The developer must review and
+   approve before creation; do not commit without explicit instruction.
+2. Begin Milestone 5 (Reviews + Redis) after the Milestone 4 commit: review
+   creation on completed bookings, the review summarisation endpoint that
+   enqueues a stub job, and the Redis queue backing it. Redis is not installed
+   locally, so the queue will be coded and tested without a live Redis
+   connection (M6 provides the real service).
+3. Milestones 1–4 are implemented. Live PostgreSQL/Redis verification of
+   migrations, concurrent slot booking, and the Redis queue remains pending
+   until Docker/PostgreSQL/Redis is available (Milestone 6).
 
 Agents must update this section whenever the project state changes.
