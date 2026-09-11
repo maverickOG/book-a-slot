@@ -22,8 +22,8 @@ class Booking(Base):
     provider_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )
-    customer_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True, nullable=True
     )
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -43,7 +43,7 @@ class Booking(Base):
         back_populates="provider_bookings",
         foreign_keys=[provider_id],
     )
-    customer: Mapped["User"] = relationship(
+    customer: Mapped["User | None"] = relationship(
         back_populates="customer_bookings",
         foreign_keys=[customer_id],
     )

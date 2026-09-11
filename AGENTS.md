@@ -271,9 +271,20 @@ Approved schema decisions:
 - A booking stores the selected provider time interval through `starts_at` and
   `ends_at`; the assessment does not explicitly require an independent slot or
   availability table.
+- `customer_id` is nullable on `bookings`. The brief says "providers offer time
+  slots, customers book them." A provider creates an available slot with no
+  customer yet (customer_id NULL, status pending). A customer later books it by
+  setting customer_id and changing status to confirmed. NOT NULL customer_id
+  would prevent this two-step flow.
+- There is no separate Slot or ProviderSlot table. The booking row itself
+  represents a slot when customer_id is NULL. The assessment names only Users,
+  Bookings, and Reviews.
 - Users have `admin`, `provider`, and `customer` roles.
 - Email is unique, reviews are one per booking, ratings are 1 through 5, and
   booking intervals must end after they start.
+- `Review.summary` is a nullable TEXT column. It exists so the review
+  summarisation endpoint (Milestone 5) has a place to persist its result without
+  requiring a later schema change. The column is not populated yet.
 - Review completion eligibility remains application logic for a later milestone;
   it is not incorrectly enforced as a cross-table database check.
 
@@ -447,6 +458,29 @@ Adding a separate provider availability table for unbooked slots.
 That would infer an API and data model not stated in the brief. It can be added
 later only if a concrete requirement requires independently managed availability.
 
+### 2026-09-11 Milestone 2 customer_id nullable and Review.summary
+
+**Decision:**
+Make `customer_id` nullable on `bookings` and add a nullable `summary` TEXT column
+to `reviews`.
+
+**Reason:**
+The brief says "providers offer time slots, customers book them." A provider
+creates an available slot with no customer yet — customer_id must be NULL at that
+point. NOT NULL would force a provider to specify a customer when creating a
+slot, which breaks the domain flow. Review.summary exists so the M5
+summarisation endpoint has a place to persist its result without a later schema
+change.
+
+**Alternative considered:**
+Keeping customer_id NOT NULL and having providers create slots with a dummy
+customer value.
+
+**Why rejected:**
+This would make the schema dishonest — a slot with no customer should not have
+a customer_id set. It would also require additional application logic to replace
+the dummy value later.
+
 ### 2026-09-11 Milestone 2 PostgreSQL configuration
 
 **Decision:**
@@ -607,6 +641,21 @@ No PostgreSQL server was available on localhost:5432, so live Alembic upgrade,
 schema inspection, relationship inserts, downgrade, and upgrade-again checks
 could not be run. Docker was also unavailable.
 
+### 2026-09-11 Milestone 2 schema fix verification
+
+**Command/check:**
+Ruff, pytest, offline Alembic upgrade/downgrade SQL for migration `20260911_0002`.
+
+**Result:**
+Ruff passed; pytest collected four tests and reported `4 passed`; offline upgrade
+SQL showed `ALTER COLUMN customer_id DROP NOT NULL` and `ADD COLUMN summary TEXT`;
+downgrade SQL showed `DROP COLUMN summary` and `ALTER COLUMN customer_id SET NOT
+NULL`.
+
+**Not verified:**
+Live PostgreSQL execution of the migration. The migration is simple DDL but needs
+a running server to confirm execution and rollback.
+
 ---
 
 # 14. Change Log
@@ -642,6 +691,19 @@ Format:
   passed, and PostgreSQL-targeted offline migration SQL was inspected. Live
   PostgreSQL migration verification remains pending because no local server was
   available.
+- Commit: Not created; the developer will review and commit the work.
+
+### 2026-09-11 Milestone 2 schema fix — customer_id nullable + Review.summary
+
+- Changed: Made `bookings.customer_id` nullable, added `reviews.summary` (nullable
+  TEXT), created Alembic migration `20260911_0002`.
+- Reason: PostgreSQL review found that NOT NULL customer_id prevented the core
+  domain flow (provider creates slot → customer books it). Review.summary exists
+  so the M5 summarisation endpoint can persist results without a later schema
+  change.
+- Verification: Ruff passed, pytest passed (`4 passed`), offline Alembic upgrade
+  SQL verified (ALTER COLUMN DROP NOT NULL + ADD COLUMN), downgrade SQL verified
+  (DROP COLUMN + ALTER COLUMN SET NOT NULL).
 - Commit: Not created; the developer will review and commit the work.
 
 ---
