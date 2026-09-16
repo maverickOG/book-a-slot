@@ -1,0 +1,87 @@
+---
+title: "Alembic migrations: the schema's history book"
+chapter: 5
+module: "data"
+order: 5
+summary: "What a migration is, how the 0001 → 0002 → 0003 chain works, and how 'alembic upgrade head' turns three files into the real schema."
+minutes: 12
+prereqs: ["04-database-models"]
+tags: ["alembic", "migrations", "postgres"]
+---
+
+import MigrationsTimeline from "../../components/diagrams/MigrationsTimeline.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+You know git — Alembic is the same idea for your **database schema**. Each change is a file; the files form a linked chain; chains run forward (`upgrade`) and backward (`downgrade`).
+
+<MigrationsTimeline client:load />
+
+## A migration is a file with two functions
+
+<Cite path="alembic/versions/20260911_0003_add_users_token.py" />
+
+```python
+revision: str = "20260911_0003"
+down_revision: Union[str, Sequence[str], None] = "20260911_0002"
+
+def upgrade() -> None:
+    op.add_column("users", sa.Column("token", sa.String(length=255), nullable=True))
+    op.create_unique_constraint("uq_users_token", "users", ["token"])
+
+def downgrade() -> None:
+    op.drop_constraint("uq_users_token", "users", type_="unique")
+    op.drop_column("users", "token")
+```
+
+- `revision` — this migration's id.
+- `down_revision` — the id of the migration it builds on. That's the pointer that forms the chain.
+- `upgrade()` — SQL-ish operations to reach this schema.
+- `downgrade()` — the exact inverse, so you can roll back.
+
+## Why `upgrade head` is the identity of truth
+
+The definitive moment is running against a real PostgreSQL:
+
+```bash
+alembic upgrade head
+```
+
+Alembic reads the chain from scratch, computes which revisions are missing in the live DB's `alembic_version` table, and applies just those. In this repo the command is part of the API container's startup, and the CI live job runs it too — the reviews table's schema we saw in chapter 4 is a *result*, this chain is the *cause*.
+
+<Callout kind="warn" title="Models lie; the database remembers">
+  The models are the target picture — the migrations are what actually run. If you ever see a mismatch, the migration chain wins. (The first snapshot even had <code>customer_id</code> NOT NULL; migration <code>0002</code> is the fix.)
+</Callout>
+
+## The story the timeline tells
+
+0001 creates **users, bookings, reviews** — but with `bookings.customer_id` NOT NULL. That's the shape an earlier design believed in.
+
+0002 relaxes `customer_id` to nullable and adds `reviews.summary`. Designed for a provider opening slots with no customer.
+
+0003 adds `users.token` for bearer authentication. Auth was deliberately added after the core schema — a separation the milestone plan (and the git history) records.
+
+Three small, reversible changes beat one giant migration: each is easy to review, and each downgrade is honest about its inverse.
+
+<Callout kind="tip" title="Reading migrations like git history">
+  When you bump into a schema question ("why is this nullable?"), open the migration that touches the column — its <code>down_revision</code> and title tell you which milestone changed it and why.
+</Callout>
+
+## How migrations discover your models
+
+`alembic/env.py` imports `app.models` so that `Base.metadata` is fully populated, then sets `target_metadata = Base.metadata`. That is what lets Alembic generate diffs of the whole schema instead of having every migration describe the world from scratch by hand.
+
+<SourceLinks
+  files={[
+    "alembic/env.py",
+    "alembic/versions/20260911_0001_create_initial_schema.py",
+    "alembic/versions/20260911_0002_nullable_customer_add_review_summary.py",
+    "alembic/versions/20260911_0003_add_users_token.py",
+  ]}
+/>
+
+<QuizCard quizId="alembic" client:load />

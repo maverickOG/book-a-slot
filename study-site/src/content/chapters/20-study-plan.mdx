@@ -1,0 +1,83 @@
+---
+title: "Your plan for actually learning this"
+chapter: 20
+module: "beyond"
+order: 20
+summary: "The 20-chapter path, rhythm of reading + playing, and hands-on labs you can run once Docker is available — so this site ends in real skill, not just knowledge."
+minutes: 8
+prereqs: []
+tags: ["study-plan", "meta"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import OrderSteps from "../../components/interactive/OrderSteps.tsx";
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+This site is the map. The 20 chapters are the trail. Here is the complete itinerary.
+
+## The vital sequence in six blocks
+
+1. **Orientation** — chapters 1–2. What the whole system is.
+2. **Language** — chapter 3. Python + FastAPI vocabulary, from zero.
+3. **Data** — chapters 4–5. Models and migrations; how schema becomes SQL.
+4. **Identity** — chapters 6–7. Tokens, roles, ownership.
+5. **Domain** — chapters 8–10. The lifecycle, the concurrency trick, reviews.
+6. **Ship + reference** — chapters 11–17. Docker, env, tests, CI, API, lifecycles, gaps.
+
+If you have time for only *three* chapters to survive a technical interview: **8, 9 and 10** — they contain the decisions that separate "implemented it" from "understood it".
+
+## The rhythm: read → play → recall
+
+- Read one chapter per session (20–30 min max). Stop at the quiz.
+- Play until you pass, then walk away. Replay the *wrong* questions tomorrow.
+- Once a week, replay the `OrderSteps` for auth and booking without looking — the muscle memory of "guard → write → verdict" beats re-reading every time.
+
+<OrderSteps
+  title="Arrange the booking lifecycle in its real order"
+  steps={[
+    "Provider opens a slot — status pending, customer_id NULL",
+    "Customer discovers it via GET /bookings?status=pending",
+    "Atomic UPDATE claims the slot → confirmed",
+    "Provider completes → completed",
+    "Customer writes the review (only on completed)",
+  ]}
+  explanation="Each step unlocks the next: an open slot is discoverable, only an open slot can be claimed, only a confirmed booking can be completed, and only a completed booking can be reviewed."
+  shuffleSeed={3}
+  client:load
+/>
+
+## Hands-on labs (when Docker is available)
+
+The endgame is running the real thing:
+
+**Lab 1 — Run the stack.**
+```bash
+docker compose up --build
+# open http://localhost:8000/docs and click through signup → login → create slot
+```
+
+**Lab 2 — Prove double-book.** Two browser windows, same slot, second gets 409.
+
+**Lab 3 — Prove role isolation.** Register two customers; confirm each sees only their own bookings (`GET /bookings`.
+
+**Lab 4 — Follow the queue.**
+```bash
+docker compose exec redis redis-cli LRANGE review_summary_jobs 0 -1
+# after POST /reviews/{id}/summarize → ["{\"review_id\": 1}"]
+```
+
+**Lab 5 — Read a migration.** Open `alembic/versions/20260911_0001_*.py` in the Code browser and find the two enum types, the CHECKs, and the deferred FK.
+
+## What "done" looks like
+
+You know you're done when you can answer these without looking anything up:
+
+1. Why is there no slot table? *(Chapter 2, 4)*
+2. What is the exact WHERE clause that makes booking atomic? *(9)*
+3. Why is 409 the right answer for a double-book? *(15)*
+4. What does `reviews.summary` exist *for*, and why is it empty? *(10, 17)*
+5. How would you migrate a fourth role? *(7)*
+
+If you can explain those to someone with zero context, memory becomes knowledge — and this site has done its job.
+
+<QuizCard quizId="teachme" chapter="20-study-plan" client:load />

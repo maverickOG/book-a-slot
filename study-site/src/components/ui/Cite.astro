@@ -1,0 +1,52 @@
+---
+interface Props {
+  path: string;
+  lines?: string;
+  commit?: string;
+}
+
+const { path, lines, commit = "e33d36f" } = Astro.props;
+
+// Which files exist in the code browser's frozen snapshot?
+const knownFiles = new Set(
+  Object.keys(
+    import.meta.glob("../../code-snapshots/**/*", { query: "?raw", import: "default", eager: true }),
+  ).map((abs) => abs.replace("../../code-snapshots/", "")),
+);
+
+// Normalize a cite path ("app/routers/auth.py") to the snapshot path or null.
+const snapPath = knownFiles.has(path) ? path : null;
+
+// GitHub blob link at the verified commit when not snapshotted (e.g. CI).
+const href = snapPath
+  ? `/code#${encodeURIComponent(snapPath)}`
+  : `https://github.com/maverickOG/book-a-slot/blob/${commit}/${path}`;
+
+const isExternal = !snapPath;
+---
+
+<p class="mt-1.5 mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[12px] text-slate-500">
+  <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 inline-block" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+  </svg>
+  <a
+    href={href}
+    class="font-semibold text-slate-700 underline decoration-slate-300 underline-offset-2 transition-colors hover:text-indigo-700 hover:decoration-indigo-400"
+    target={isExternal ? "_blank" : undefined}
+    rel={isExternal ? "noreferrer" : undefined}
+    aria-label={`${path} — open in ${isExternal ? "the GitHub repository" : "the code browser"}`}
+  >
+    {path}
+  </a>
+  {lines && <span>· lines {lines}</span>}
+  <a
+    href={href}
+    class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+    target={isExternal ? "_blank" : undefined}
+    rel={isExternal ? "noreferrer" : undefined}
+    aria-label={isExternal ? `Open ${path} at commit @${commit} on GitHub` : `Open ${path} in the code browser`}
+  >
+    @{commit}
+  </a>
+</p>

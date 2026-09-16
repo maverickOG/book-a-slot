@@ -1,0 +1,80 @@
+---
+title: "What this project is"
+chapter: 1
+module: "big-picture"
+order: 1
+summary: "One page orientation: the assessment, the stack, the three tables, and how the whole thing is verified."
+minutes: 8
+prereqs: []
+tags: ["overview", "stack", "assessment"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+"Book a Slot" is a full-stack take-home assessment: providers open time slots, customers book them, and customers review completed bookings. The whole thing — API, database, queue, machines, and tests — lives in one repository that you can run with a single command.
+
+## What was asked
+
+The brief calls for a FastAPI (or Django) service over <GlossaryTerm term="PostgreSQL" label="PostgreSQL" client:load /> with <GlossaryTerm term="Redis" label="Redis" client:load />, containerised with <GlossaryTerm term="Docker" label="Docker" client:load />, tested automatically, and wrapped in <GlossaryTerm term="GitHub Actions" label="GitHub Actions" client:load />. Three conceptual entities drive the schema: **Users**, **Bookings**, and **Reviews**.
+
+<Callout kind="note" title="Delivery pipeline">
+  Every milestone was built the same way: decide → implement → test → record why. The repository history is a readable story (scaffold → schema → auth → bookings → reviews → Docker/CI → docs), and this site mirrors that story chapter by chapter.
+</Callout>
+
+## The stack at a glance
+
+| Layer | Thing | Role here |
+|---|---|---|
+| Web framework | FastAPI 0.141.1 | Declares routes from Python type-hinted functions |
+| Server | Uvicorn | Runs the app on a port |
+| ORM | SQLAlchemy 2.0 | Maps Python classes to PostgreSQL tables |
+| Migrations | Alembic 1.19 | Versioned schema changes (0001 → 0002 → 0003) |
+| Database | PostgreSQL 16 | The real datastore |
+| Queue | Redis 7 | A work queue for review summarisation (stub) |
+| Containers | Docker + Compose | One stack: `api` + `db` + `redis` |
+| CI | GitHub Actions | Lint, unit tests, Docker build, live smoke test |
+| Tests | pytest + Ruff | 53 unit tests + 1 gated live test |
+
+## The three tables (the whole domain)
+
+- **users** — one row per account, with a `role` of `admin`, `provider`, or `customer`.
+- **bookings** — one row per time slot **or** customer booking. There is deliberately no separate "slots" table: an *available* slot *is* a bookings row with status `pending` and `customer_id` left NULL, waiting for a customer to claim it.
+- **reviews** — one per completed booking, rating 1–5 plus a comment.
+
+<Callout kind="tip" title="The pattern that will keep coming back">
+  **Exactly one row means at most one review**: the `booking_id` column is UNIQUE, and the insert is double-guarded in code. You'll meet this "constraint plus code check" pairing over and over.
+</Callout>
+
+## What is *not* here (read this twice)
+
+This project ships some intentionally small pieces. Knowing what is *not* there stops you misreading what is:
+
+- No **background worker** and no **AI summariser** — `POST /reviews/{id}/summarize` only pushes a job onto a Redis list and returns `202`.
+- No **JWT** — authentication is a random token stored in `users.token`.
+- No **simulated concurrent-transaction stress test** — double-booking safety is by design (an atomic conditional UPDATE) and proved behaviourally, not by load testing.
+- No **visible cancellation** — `cancelled` exists in the enum but no route sets it.
+- No **SQLite in production** — SQLite is only an in-memory stand-in for unit tests; PostgreSQL is the only real target.
+
+<Callout kind="warn" title="Others may describe it differently">
+  Online tutorials often bolt on JWT, cron workers, and ORM auto-creates. This site sticks strictly to what the repository actually does, verified at app-code commit <code>e33d36f</code>.
+</Callout>
+
+## How this site is organised
+
+Nine modules walk beginners to confidence:
+
+1. **Big picture** — what the system is (you are here)
+2. **Python & FastAPI basics** — the language and framework from zero
+3. **The data layer** — models, schema, migrations
+4. **Identity & access** — hashing, tokens, roles
+5. **The booking domain** — the slot lifecycle, the atomic claim, reviews
+6. **Running the stack** — Docker, Postgres, environment
+7. **Confidence** — tests and CI
+8. **Reference** — API, lifecycles, production gaps
+9. **Study & beyond** — interactive learning and design thinking
+
+Each chapter ends with a self-check. The **Playground**, **Code browser**, and **Glossary** in the top bar are always one click away.
+
+<QuizCard quizId="overview" client:load />

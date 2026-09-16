@@ -1,0 +1,135 @@
+---
+import AppShell from "../layouts/AppShell.astro";
+import { modules } from "../data/modules";
+import { allChapters, findPrevNext } from "../lib/chapters";
+
+interface Props {
+  id: string;
+}
+
+const { id } = Astro.props;
+const chapters = await allChapters();
+const chapter = chapters.find((c) => c.id === id);
+
+if (!chapter) {
+  throw new Error(`ChapterLayout: chapter "${id}" not found`);
+}
+
+const moduleInfo = modules.find((m) => m.key === chapter.module);
+const { prev, next } = findPrevNext(chapters, id);
+const href = `/chapters/${id}`;
+---
+
+<AppShell title={`${chapter.chapter}. ${chapter.title}`} description={chapter.summary} path={href}>
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">
+        {moduleInfo?.number} · {moduleInfo?.label}
+      </p>
+      <h1 class="page-title">{chapter.title}</h1>
+      <p class="page-lead">{chapter.summary}</p>
+      <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
+        <span>
+          Chapter {String(chapter.chapter).padStart(2, "0")}
+        </span>
+        <span>· ~{chapter.minutes} min read</span>
+        {chapter.prereqs.length > 0 && (
+          <span>
+            · Prereqs:{" "}
+            {chapter.prereqs.map((p, i) => (
+              <a href={`/chapters/${p}`} class="font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2">
+                {chapters.find((c) => c.id === p)?.title ?? p}
+                {i < chapter.prereqs.length - 1 ? ", " : ""}
+              </a>
+            ))}
+          </span>
+        )}
+        <span class="flex flex-wrap gap-1.5">
+          {chapter.tags.map((t) => (
+            <span class="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-500">
+              {t}
+            </span>
+          ))}
+        </span>
+      </div>
+    </header>
+
+    <slot />
+
+    {/* Sentinel: reaching this point (just past the end-of-chapter quiz) marks
+        the chapter as read in the browser-local learning store. */}
+    <div id="chapter-end" class="h-1" aria-hidden="true" data-chapter-id={id}></div>
+
+    <footer class="mt-12 border-t border-slate-200 pt-5">
+      <p class="text-xs text-slate-400">
+        This chapter reflects the repository as of app-code commit
+        <code class="rounded bg-slate-100 px-1 py-0.5 font-mono"> e33d36f </code>
+        (repo HEAD <code class="rounded bg-slate-100 px-1 py-0.5 font-mono">740be25</code>). Every
+        code example is a frozen copy from <code class="rounded bg-slate-100 px-1 py-0.5 font-mono">study-site/src/code-snapshots</code>.
+      </p>
+
+      <div class="mt-5 grid gap-3 sm:grid-cols-2">
+        {prev ? (
+          <a
+            href={`/chapters/${prev.id}`}
+            class="group rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-indigo-300 hover:bg-indigo-50/40"
+          >
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-400">← Previous</p>
+            <p class="mt-1 font-semibold text-slate-800 group-hover:text-indigo-700">
+              {String(prev.chapter).padStart(2, "0")} · {prev.title}
+            </p>
+          </a>
+        ) : (
+          <span />
+        )}
+        {next ? (
+          <a
+            href={`/chapters/${next.id}`}
+            class="group rounded-xl border border-slate-200 bg-white p-4 text-right transition-colors hover:border-indigo-300 hover:bg-indigo-50/40"
+          >
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Next →</p>
+            <p class="mt-1 font-semibold text-slate-800 group-hover:text-indigo-700">
+              {String(next.chapter).padStart(2, "0")} · {next.title}
+            </p>
+          </a>
+        ) : (
+          <span />
+        )}
+      </div>
+    </footer>
+  </article>
+</AppShell>
+
+<script>
+  import { markOpened, markReadToEnd } from "../lib/learning";
+
+  const endEl = document.getElementById("chapter-end");
+  const chapterId = endEl?.getAttribute("data-chapter-id") || "";
+
+  if (chapterId) {
+    markOpened(chapterId);
+
+    // Completion is only granted when the reader actually reaches the absolute
+    // end of the document — a mid-page pass over the sentinel is not enough.
+    if (endEl) {
+      let done = false;
+      const atBottom = () => {
+        const doc = document.documentElement;
+        return window.scrollY + window.innerHeight >= doc.scrollHeight - 2;
+      };
+      const check = () => {
+        if (!done && atBottom()) {
+          done = true;
+          markReadToEnd(chapterId);
+          window.removeEventListener("scroll", check);
+          window.removeEventListener("resize", check);
+        }
+      };
+      window.addEventListener("scroll", check, { passive: true });
+      window.addEventListener("resize", check);
+      // A chapter whose whole content fits on screen is immediately done. A
+      // page that needs scrolling is deliberately NOT marked on load.
+      check();
+    }
+  }
+</script>

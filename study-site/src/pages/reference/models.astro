@@ -1,0 +1,61 @@
+---
+import AppShell from "../../layouts/AppShell.astro";
+import SchemaDiagram from "../../components/diagrams/SchemaDiagram.tsx";
+import { models } from "../../data/models";
+import Callout from "../../components/ui/Callout.astro";
+---
+
+<AppShell title="Data models · Inside Book a Slot" description="The three tables, their columns and constraints.">
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">Reference</p>
+      <h1 class="page-title">Data models</h1>
+      <p class="page-lead">
+        Three tables only — the final schema is enforced by PostgreSQL via the Alembic
+        migration chain, and mirrors <code>app/models/*.py</code>.
+      </p>
+    </header>
+
+    <SchemaDiagram client:load />
+
+    <div class="mt-8 grid gap-5 lg:grid-cols-3">
+      {models.map((m) => (
+        <div class="rounded-2xl border border-slate-200 bg-white">
+          <div class="border-b border-slate-100 px-4 py-3">
+            <p class="font-mono text-sm font-bold text-indigo-700">{m.table}</p>
+            <p class="mt-0.5 text-xs text-slate-500">{m.label}</p>
+          </div>
+          <ul class="divide-y divide-slate-100">
+            {m.fields.map((f) => (
+              <li class="px-4 py-2.5 text-sm">
+                <p class="flex items-baseline justify-between gap-2">
+                  <span class="font-mono text-[13px] font-medium text-slate-800">{f.name}</span>
+                  <span class="whitespace-nowrap font-mono text-[11px] text-slate-400">{f.type}</span>
+                </p>
+                {f.notes && <p class="mt-0.5 text-xs text-slate-500">{f.notes}</p>}
+              </li>
+            ))}
+          </ul>
+          {m.constraints && (
+            <div class="border-t border-slate-100 px-4 py-3">
+              <ul class="space-y-1 text-xs text-slate-600">
+                {m.constraints.map((c) => (
+                  <li class="font-mono">· {c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p class="border-t border-slate-100 bg-slate-50 px-4 py-2 font-mono text-[11px] text-slate-400">
+            {m.source}
+          </p>
+        </div>
+      ))}
+    </div>
+
+    <Callout kind="warn" title="The two decisions that shape everything">
+      <strong>customer_id is nullable</strong> — a pending slot has no customer yet; the
+      customer is attached at booking. And <strong>there is no separate 'slots' table</strong> —
+      a slot <em>is</em> a pending bookings row. See chapter 4 for the normalisation rationale.
+    </Callout>
+  </article>
+</AppShell>

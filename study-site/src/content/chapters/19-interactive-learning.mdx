@@ -1,0 +1,113 @@
+---
+title: "Interactive learning: think, don't just watch"
+chapter: 19
+module: "beyond"
+order: 19
+summary: "The hands-on tools on this site — quizzes, order-the-steps, the request simulator, and the 'Which is real?' spotting game — and why playing them beats re-reading."
+minutes: 8
+prereqs: []
+tags: ["interactive", "practice"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import OrderSteps from "../../components/interactive/OrderSteps.tsx";
+import WhichIsReal from "../../components/interactive/WhichIsReal.tsx";
+import RequestSimulator from "../../components/interactive/RequestSimulator.tsx";
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+This chapter is a guide to the site's own interactive tools. They exist because the fastest way to make a concept yours is to *make a decision and get immediate feedback* — especially on the state-concurrency gaps that plain reading skips over.
+
+## QuizCard — the checkpoint at the end of every chapter
+
+Every chapter ends with `QuizCard`. To pass, you don't just recall terms — you **apply** them:
+
+- "A customer calls `GET /bookings?status=pending`. What can they *never* see?" → forces you to reason about `customer_id IS NULL`.
+
+Each correct answer is immediate feedback. Use quizzes as a *pre-*reading test too: fail five, and you know lecture the chapter needs.
+
+## OrderSteps — build the pipeline by hand
+
+<OrderSteps
+  title="Put the authentication journey in the order it actually runs"
+  steps={[
+    "Signup hashes the password and stores password_hash",
+    "Login verifies the password with verify_password",
+    "Login stores a token in users.token",
+    "The client sends Authorization: Bearer <token>",
+    "get_current_user finds the user by token and returns them",
+  ]}
+  explanation="Auth is a sequence: create, verify + issue, then look up on every later request. Notice 'store the token' comes before 'use the token' — the DB column is the source of truth."
+  shuffleSeed={7}
+  client:load
+/>
+
+You get shuffled steps (`hash password`, `verify it`, `store token in users.token`, …) and must arrange them in the *runtime* order. The autograder reveals ordering subtleties — like how the auth dependency runs *before* body validation.
+
+## WhichIsReal — the spotting game
+
+<WhichIsReal
+  file="app/routers/bookings.py"
+  correct={`@router.post("/{booking_id}/book", response_model=BookingResponse)
+def book_slot(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer),
+) -> Booking:
+    booking = get_booking_or_404(booking_id, db)
+    result = db.execute(
+        update(Booking)
+        .where(
+            Booking.id == booking.id,
+            Booking.status == BookingStatus.PENDING,
+            Booking.customer_id.is_(None),
+        )
+        .values(customer_id=current_user.id, status=BookingStatus.CONFIRMED)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Slot is no longer available",
+        )
+    db.commit()
+    db.refresh(booking)
+    return booking`}
+  wrong={`@router.post("/{booking_id}/book", response_model=BookingResponse)
+def book_slot(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer),
+) -> Booking:
+    booking = get_booking_or_404(booking_id, db)
+    if booking.status != BookingStatus.PENDING or booking.customer_id is not None:
+        raise HTTPException(status_code=409, detail="Slot is no longer available")
+    booking.customer_id = current_user.id
+    booking.status = BookingStatus.CONFIRMED
+    db.commit()
+    db.refresh(booking)
+    return booking`}
+  wrongReason="The real repo code does NOT check-then-update. It folds the conditions into a single atomic UPDATE's WHERE clause and depends on result.rowcount. The plausible variant on the right can double-book in a race: both requests may pass the 'if' before either commits."
+  client:load
+/>
+
+Two code snippets, only one is actually in the repo. The fake is a plausible-but-fake variant (e.g. a non-atomic check-then-update) — so winning at this game means you know the *real* fix, not a lookalike.
+
+## RequestSimulator — trace one request end to end
+
+<RequestSimulator client:load />
+
+Pick a target (book a slot), then press through the phases of the journey: which dependency fires first, which guard raises, which SQL executes. The simulator maps one-to-one onto the journeys in chapter 16, so reading and playing reinforce each other.
+
+## The rule of play
+
+1. **Read** a chapter.
+2. **Play** its end-of-chapter quiz immediately — same session.
+3. **Revisit** the ones you got wrong *before bed* (spaced repetition beats cramming).
+4. **Replay** a chapter's tools after you've written any code yourself — even a failed attempt changes how you parse them.
+
+<Callout kind="note" title="No data leaves this site">
+  Every tool runs in your browser. Correct/incorrect is decided locally; nothing is collected, logged, or sent anywhere.
+</Callout>
+
+Ready to prove it? Take the chapter-19 quiz, then head to the **Playground** to stress the request simulator on the review journey you saw in chapter 10.
+
+<QuizCard quizId="interactive" client:load />

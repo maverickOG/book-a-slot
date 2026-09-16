@@ -1,0 +1,147 @@
+---
+title: "Python & FastAPI basics, from zero"
+chapter: 3
+module: "language"
+order: 3
+summary: "The smallest amount of Python/FastAPI you need to read this repo with confidence: functions, types, decorators, routers, dependencies, and request models."
+minutes: 14
+prereqs: ["01-overview"]
+tags: ["python", "fastapi", "pydantic"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+You are an experienced programmer, so this chapter skips "what is a variable". It maps the Python/FastAPI idioms you'll actually meet, anchored to the files that use them.
+
+## 1. An API is a set of functions
+
+FastAPI's trick: a Python function *is* an endpoint. A decorator tells FastAPI the method and path:
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI(title="Book a Slot")
+
+@app.get("/")
+def read_root() -> dict[str, str]:
+    return {"message": "Book a Slot API is running"}
+```
+
+The function's **return type** (`dict[str, str]`) is even used to build the docs. FastAPI converts the Python dict into a JSON response.
+
+## 2. Type hints are the framework
+
+In FastAPI, type hints are not documentation — they are **validation and serialisation**. A parameter typed `int` with `Query(...)` becomes a query parameter; a `BaseModel` becomes a parsed-and-validated request body.
+
+From `app/routers/auth.py`:
+
+<Cite path="app/routers/auth.py" lines="17–35" />
+
+```python
+from pydantic import BaseModel
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+
+class MeResponse(BaseModel):
+    id: int
+    email: str
+    role: UserRole
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+```
+
+<GlossaryTerm term="Pydantic" label="Pydantic" client:load /> models declare the shape of requests and responses. A missing field or a wrong type produces a <Pill tone="indigo">422</Pill> before your function even runs.
+
+<Callout kind="note">
+  Pydantic also gives you cross-field checks. In <code>app/routers/bookings.py</code>, the <code>model_validator</code> rejects <code>ends_at &lt;= starts_at</code> with a <code>ValueError</code> — one more 422 defence before any row is touched.
+</Callout>
+
+## 3. Routers keep files small
+
+An <GlossaryTerm term="APIRouter" label="APIRouter" client:load /> is a bundle of routes with a shared prefix:
+
+```python
+router = APIRouter(prefix="/bookings", tags=["bookings"])
+
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=BookingResponse)
+def create_slot(...):
+    ...
+```
+
+`app/main.py` then does `app.include_router(bookings_router)`, and all of these route lines start appearing under `/bookings`. `status_code=` in the decorator fixes the success code; `response_model=` tells FastAPI to filter the response down to those fields.
+
+## 4. Dependencies: the parts FastAPI assembles for you
+
+This is the single most important FastAPI concept for reading this repo. A route declares the things it needs as parameters with default `Depends(...)`:
+
+```python
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+
+@router.get("/{booking_id}", response_model=BookingResponse)
+def get_booking(
+    booking_id: int,                              # path parameter
+    db: Session = Depends(get_db),                # dependency: a DB session
+    current_user: User = Depends(get_current_user),  # dependency: who am I?
+) -> Booking:
+    ...
+```
+
+Before calling `get_booking`, FastAPI resolves `get_db` (opens a session, yields it) and `get_current_user` (parses the `Authorization` header, finds the user). If `get_current_user` raises <Pill tone="rose">401</Pill>, the endpoint body never runs.
+
+<Callout kind="warn" title="Validation happens first — this bites people">
+  FastAPI builds all parameters <strong>before</strong> the endpoint body runs. So if the authorization check sits inside the function body (like the ownership helpers in <code>security.py</code>) and the request body is malformed, you get a <strong>422 before the 403</strong>. The role checks (<code>require_provider</code> etc.) are themselves <code>Depends</code>, so their 403 fires first. The repo's tests were written with exactly this order in mind.
+</Callout>
+
+## 5. Sync or async? (Here: sync)
+
+FastAPI handles both `def` and `async def` routes. This project uses plain `def` functions — database work is synchronous SQLAlchemy, which is the simplest correct choice and fully supported by FastAPI (it runs them in a thread pool). No `await` anywhere near PostgreSQL.
+
+## 6. Sessions are short-lived, per request
+
+`app/database.py` wires up the engine and a session factory, and exposes the dependency all routes share:
+
+<Cite path="app/database.py" />
+
+```python
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+def get_db() -> Generator[Session, None, None]:
+    """Yield one database session and always close it afterwards."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+One session per request, always closed — no long-lived sessions leaking across requests. `pool_pre_ping=True` makes SQLAlchemy verify a pooled connection is alive before using it.
+
+## 7. Exercises to build confidence
+
+- In `GET /auth/me` (`app/routers/auth.py`), identify the dependency that could return <Pill tone="rose">401</Pill>.
+- In `POST /bookings`, work out which dependency would return <Pill tone="amber">403</Pill> for a logged-in customer.
+- Why would sending `{"rating": 6}` to `POST /reviews` never even reach the function body?
+
+<SourceLinks
+  files={[
+    "app/main.py",
+    "app/database.py",
+    "app/routers/auth.py",
+  ]}
+/>
+
+<QuizCard quizId="fastapi" client:load />

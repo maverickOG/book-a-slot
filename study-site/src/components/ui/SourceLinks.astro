@@ -1,0 +1,35 @@
+---
+interface Props {
+  files: string[];
+  title?: string;
+}
+
+const { files, title = "Read the real source" } = Astro.props;
+
+// Each entry is a path relative to the repository root, matched to a file
+// in the code browser's frozen snapshot (e.g. "app/models/booking.py").
+// The code browser deep-links by id "file-<sanitized-path>".
+---
+
+<div class="not-prose my-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+  <p class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">{title}</p>
+  <ul class="space-y-1.5">
+    {files.map((f) => (
+      <li>
+        <a
+          href={`/code#${encodeURIComponent(f)}`}
+          class="group flex items-center gap-2 rounded-lg px-2 py-1 font-mono text-[13px] text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800"
+        >
+          <svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-slate-400 transition-colors group-hover:text-indigo-500" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M12.97 4.22a1 1 0 011.06 0l3.5 2a1 1 0 010 1.66l-3.5 2a1 1 0 11-1.06-1.7l1.63-.93-1.63-.93a1 1 0 010-1.7zM7.03 4.22a1 1 0 010 1.7L5.4 6.85l1.63.93a1 1 0 11-1.06 1.7l-3.5-2a1 1 0 010-1.66l3.5-2a1 1 0 011.06 0zM9.05 3.5a1 1 0 011.17.73l-1 5.5a1 1 0 11-1.94-.36l1-5.5a1 1 0 01.77-.37z" clip-rule="evenodd" />
+          </svg>
+          <span>{f}</span>
+          <span aria-hidden="true" class="ml-auto text-slate-400 group-hover:text-indigo-600">↗</span>
+        </a>
+      </li>
+    ))}
+  </ul>
+  <p class="mt-2 text-[11px] text-slate-400">
+    Opens the matching file in the Code browser's frozen snapshot (verified app-code commit <code>e33d36f</code>).
+  </p>
+</div>

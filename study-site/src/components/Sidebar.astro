@@ -1,0 +1,152 @@
+---
+import { allChapters, chaptersByModule } from "../lib/chapters";
+import { quizzes } from "../data/quiz";
+
+interface Props {
+  path?: string;
+}
+
+const { path = "/" } = Astro.props;
+const chapters = await allChapters();
+const grouped = chaptersByModule(chapters);
+const quizChapterIds = quizzes.map((q) => q.chapter);
+---
+
+<aside class="hidden w-72 shrink-0 lg:block">
+  <nav aria-label="Chapter navigation" class="sticky top-20 max-h-[calc(100vh-6rem)] space-y-5 overflow-y-auto pb-6 pr-1.5">
+    <div class="rounded-xl border border-slate-200 bg-white/70 p-3">
+      <p class="mb-1 text-xs font-semibold uppercase tracking-widest text-slate-400">
+        Learning progress
+      </p>
+      <p id="progress-summary" aria-live="polite" class="text-sm tabular-nums text-slate-700" data-quiz-ids={JSON.stringify(quizChapterIds)}>
+        Read 0/{chapters.length} · Quiz passed 0/{quizChapterIds.length} · Mastered 0/{chapters.length}
+      </p>
+      <button
+        id="progress-reset"
+        class="mt-2 rounded text-xs font-medium text-indigo-600 hover:underline"
+      >
+        Reset all learning progress
+      </button>
+    </div>
+
+    {grouped.map((g) => (
+      <div>
+        <p class="mb-1 px-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+          {g.module.number} · {g.module.label}
+        </p>
+        <ul class="space-y-0.5">
+          {g.items.map((c) => {
+            const href = `/chapters/${c.id}`;
+            const active = path === href;
+            return (
+              <li>
+                <a
+                  href={href}
+                  data-id={c.id}
+                  aria-current={active ? "page" : undefined}
+                  class:list={[
+                    "chapter-link group flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] leading-snug transition-colors",
+                    active
+                      ? "chapter-link-active bg-slate-100/90 font-semibold text-indigo-900"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                  ]}
+                >
+                  <span
+                    class="sidebar-marker h-4 w-4 shrink-0 text-center text-[11px] leading-4"
+                    aria-hidden="true"
+                  />
+                  <span class:list={["shrink-0 tabular-nums", active ? "text-indigo-700" : "text-slate-400"]}>
+                    {String(c.chapter).padStart(2, "0")}
+                  </span>
+<span class="min-w-0 whitespace-normal chapter-title">
+                      {c.title}
+                    </span>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    ))}
+
+    <div class="mx-3 rounded-lg border border-slate-200 bg-white/70 p-3 text-[11px] leading-5 text-slate-500">
+      <p class="font-semibold text-slate-600">Progress markers</p>
+      <p><span class="sidebar-marker" data-state="mastered" aria-hidden="true">★</span> mastered — read to the end + quiz passed</p>
+      <p><span class="sidebar-marker" data-state="passed" aria-hidden="true">✓</span> quiz passed</p>
+      <p><span class="sidebar-marker" data-state="read" aria-hidden="true">●</span> read to the end</p>
+      <p><span class="sidebar-marker" data-state="opened" aria-hidden="true">○</span> opened, not finished</p>
+      <p class="mt-1.5 text-slate-400">Progress lives in this browser only.</p>
+    </div>
+  </nav>
+</aside>
+
+<script>
+  import {
+    LEARNING_EVENT,
+    loadLearning,
+    masteredCount,
+    quizPassedCount,
+    readCount,
+    resetAllLearning,
+  } from "../lib/learning";
+
+  function apply() {
+    const state = loadLearning();
+    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>("a.chapter-link"));
+    const summaryEl = document.getElementById("progress-summary");
+    const quizIds: string[] = summaryEl ? JSON.parse(summaryEl.getAttribute("data-quiz-ids") || "[]") : [];
+    const quizCount = quizIds.length;
+
+    for (const a of links) {
+      const id = a.getAttribute("data-id");
+      if (!id) continue;
+      const c = state.chapters[id];
+      const marker = a.querySelector<HTMLElement>(".sidebar-marker");
+      let glyph = "";
+      let title = "";
+      let dataState = "unopened";
+
+      if (c?.mastered) {
+        glyph = "★";
+        dataState = "mastered";
+        title = "Mastered — read to the end and quiz passed";
+      } else if (c?.quizPassed) {
+        glyph = "✓";
+        dataState = "passed";
+        title = "Quiz passed";
+      } else if (c?.readToEnd) {
+        glyph = "●";
+        dataState = "read";
+        title = "Read to the end";
+      } else if (c?.opened) {
+        glyph = "○";
+        dataState = "opened";
+        title = "Opened, not yet finished";
+      }
+
+      if (marker) {
+        marker.textContent = glyph;
+        marker.setAttribute("data-state", dataState);
+      }
+      const labelEl = a.querySelector<HTMLElement>(".chapter-title");
+      const label = labelEl?.textContent?.trim() || a.textContent?.trim() || "";
+      a.title = title ? label + " — " + title : label;
+    }
+
+    if (summaryEl) {
+      const passed = quizPassedCount(state, quizIds);
+      summaryEl.textContent = "Read " + readCount(state) + "/" + links.length + " · Quiz passed " + passed + "/" + quizCount + " · Mastered " + masteredCount(state) + "/" + links.length;
+    }
+  }
+
+  const reset = document.getElementById("progress-reset");
+  reset?.addEventListener("click", () => {
+    if (!window.confirm("Clear all reading and quiz progress on this device? This cannot be undone.")) return;
+    resetAllLearning();
+    apply();
+  });
+
+  window.addEventListener(LEARNING_EVENT, apply);
+  window.addEventListener("storage", apply);
+  apply();
+</script>

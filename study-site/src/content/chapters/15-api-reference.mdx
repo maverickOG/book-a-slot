@@ -1,0 +1,54 @@
+---
+title: "API reference and the docs FastAPI gives you"
+chapter: 15
+module: "reference"
+order: 15
+summary: "Every endpoint the API exposes, its auth requirement, body and status codes — plus the Auto-generated docs that ship with FastAPI for free."
+minutes: 10
+prereqs: ["06-authentication", "07-rbac"]
+tags: ["api", "reference", "endpoints"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+There are exactly **12 routes** across three routers. Every one is in `src/data/endpoints.ts` on this site, and the same contract is what FastAPI renders automatically at <GlossaryTerm term="FastAPI" label="FastAPI" client:load />'s built-in docs pages.
+
+## The free docs
+
+Two URLs come with FastAPI and need zero extra code:
+
+- `GET /openapi.json` — the machine-readable OpenAPI document.
+- `GET /docs` — the interactive Swagger UI, where you can try every endpoint.
+
+The repo references both in its own README; they are generated from the same type hints and `response_model`s you met in chapter 3.
+
+## The route table
+
+| Method | Path | Auth | Purpose | Outcomes |
+|---|---|---|---|---|
+| POST | `/auth/signup` | none | create a customer | 201, 400 |
+| POST | `/auth/login` | none | get a bearer token | 200, 401 |
+| GET | `/auth/me` | bearer | who am I? | 200, 401 |
+| POST | `/bookings` | provider | open a slot | 201, 403, 422 |
+| GET | `/bookings` | bearer | role-filtered list | 200, 401 |
+| GET | `/bookings/{id}` | bearer | read one | 200, 403, 404 |
+| PUT | `/bookings/{id}` | provider/admin | reschedule open slot | 200, 409, 403, 404 |
+| DELETE | `/bookings/{id}` | provider/admin | remove open slot | 204, 409, 403, 404 |
+| POST | `/bookings/{id}/book` | customer | claim a slot | 200, 409, 403, 404 |
+| POST | `/bookings/{id}/complete` | provider/admin | finish a booking | 200, 409, 403, 404 |
+| POST | `/reviews` | customer | review a completed booking | 201, 409, 403, 404 |
+| POST | `/reviews/{id}/summarize` | author | enqueue summary job | 202, 404, 403 |
+
+## The three "why" questions worth keeping
+
+1. **Why is there no `GET /bookings/available`?** Discovery is the existing `GET /bookings?status=pending` — it overloads the list endpoint instead of inventing a new route. An assessment listing only CRUD plus book/complete, with a customer-read-only rule, is satisfied by the filter.
+2. **Why `409` and not `400` or `422`?** 409 means "valid request, conflicts with current state" — exactly what a double-book or a premature review is. The repo uses 409 for *state* problems and 422 for *shape* problems, consistently.
+3. **Why no auth on signup/login?** You can't be authenticated before you exist. Everything else hangs off `get_current_user`, so there are no "leaky" endpoints.
+
+<Callout kind="warn" title="Try the real thing">
+  Run <code>docker compose up --build</code> in the repository and open <code>http://localhost:8000/docs</code> — every row above is clickable there. The Playground in this site is a static stand-in; the docs are backed by the running API.
+</Callout>
+
+<QuizCard quizId="api" client:load />

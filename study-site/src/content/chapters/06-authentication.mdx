@@ -1,0 +1,122 @@
+---
+title: "Authentication: hashing, tokens, sessions"
+chapter: 6
+module: "identity"
+order: 6
+summary: "How passwords become unreadable hashes, how a login issues a bearer token, and how every request proves who you are."
+minutes: 13
+prereqs: ["03-python-fastapi-basics"]
+tags: ["auth", "passlib", "tokens", "security"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+Three routes make up the whole identity story: `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`.
+
+<Cite path="app/routers/auth.py" lines="38–83" />
+
+```python
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
+def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> MeResponse:
+    existing = db.scalar(select(User).where(User.email == payload.email))
+    if existing is not None:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(email=payload.email, password_hash=get_password_hash(payload.password), role=UserRole.CUSTOMER)
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Email already registered") from None
+    db.refresh(user)
+    return MeResponse(id=user.id, email=user.email, role=user.role)
+
+@router.post("/login")
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    user = db.scalar(select(User).where(User.email == payload.email))
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    user.token = secrets.token_urlsafe(32)
+    db.commit()
+    return TokenResponse(access_token=user.token)
+
+@router.get("/me")
+def me(current_user: User = Depends(get_current_user)) -> MeResponse:
+    return MeResponse(id=current_user.id, email=current_user.email, role=current_user.role)
+```
+
+Three ideas matter here.
+
+## 1. Passwords are hashed, never stored
+
+`passlib`'s `CryptContext(schemes=["pbkdf2_sha256"])` (in `app/security.py`) hashes on signup and verifies on login:
+
+```python
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+```
+
+<GlossaryTerm term="PBKDF2-SHA256" label="PBKDF2-SHA256" client:load /> is a deliberately slow, salted derivation. The database column is called `password_hash` and nothing else ever reads it.
+
+<Callout kind="warn" title="Why not bcrypt?">
+  The original plan used <code>passlib[bcrypt]</code>. On Python 3.14 that combination crashes: passlib 1.7.4 is unmaintained, reads <code>bcrypt.__about__.__version__</code> which bcrypt 5.0 removed, and its self-check trips bcrypt's 72-byte limit. passlib's <code>pbkdf2_sha256</code> is pure Python (stdlib <code>hashlib</code>) and was verified to hash/verify on this machine. This is a real, documented decision — not a code quirk.
+</Callout>
+
+## 2. A login is "store a random token, hand it out"
+
+Login `secrets.token_urlsafe(32)`-generates a token, **persists it in `users.token`**, commits, and returns it. Every later request sends `Authorization: Bearer <token>`, and `get_current_user` resolves it:
+
+<Cite path="app/security.py" lines="26–47" />
+
+```python
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.scalar(select(User).where(User.token == credentials.credentials))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user
+```
+
+<Callout kind="note" title="Design choice: database token instead of JWT">
+  The brief only asks for "bearer authentication". A DB-stored token needs no signing key, no expiry clock, no refresh dance, and is revocable simply by clearing <code>users.token</code>. JWT would add a signing-key lifecycle the brief doesn't ask for. Downsides (a DB query per request, no expiry) are honest trade-offs the production chapter covers.
+</Callout>
+
+## 3. Signup can never self-assign a role
+
+Anonymous signup always creates a customer:
+
+```python
+role=UserRole.CUSTOMER
+```
+
+If a caller sneaks in `{"role": "admin"}`, Pydantic silently drops the extra field (it's not in `SignupRequest`). Chapter 7 builds role enforcement on top of this guaranteed customer baseline.
+
+## Small hardening you shouldn't miss
+
+- The duplicate-email **pre-check** (SELECT) is followed by an `IntegrityError` catch on commit. Two concurrent signups with the same email would otherwise surface a 500; the commit is wrapped so the loser gets a clean 400.
+- Login answers <Pill tone="rose">401</Pill> for *both* unknown email and wrong password — no account enumeration.
+- `GET /auth/me` returns exactly `{id, email, role}`. The response model `MeResponse` guarantees `password_hash` and `token` never leak into a response.
+
+<SourceLinks
+  files={[
+    "app/routers/auth.py",
+    "app/security.py",
+    "app/models/user.py",
+  ]}
+/>
+
+<QuizCard quizId="auth" client:load />

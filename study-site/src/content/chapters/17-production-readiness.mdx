@@ -1,0 +1,79 @@
+---
+title: "Production-safety gaps (honest assessment)"
+chapter: 17
+module: "reference"
+order: 17
+summary: "What this project deliberately does not do yet — the gaps between 'assessment-correct' and 'shippable': TLS, token expiry, a worker, pagination and more."
+minutes: 12
+prereqs: ["16-request-lifecycles"]
+tags: ["production", "gaps", "security"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+This project is architected to satisfy an assessment brief, and it does that well. "Production-ready" is a different bar. This chapter is the honest list — each item notes what's real and what would be done next, with no invented work passed off as done.
+
+<Callout kind="note" title="Source of truth">
+  These gaps are recorded in the repository's own technical note (<code>TECHNICAL_NOTE.md</code>) — this site is not inventing them.
+</Callout>
+
+## 1. No TLS, no reverse proxy
+
+The API listens as a plain single Uvicorn process on port 8000. In production you would put a TLS-terminating reverse proxy (Caddy, Nginx, Traefik) in front, and run multiple Uvicorn workers behind it.
+
+**Next:** a proxy container + Let's Encrypt; DATABASE_URL/Redis credentials vaulted, not committed.
+
+## 2. Credentials are demo values
+
+The Compose file ships `book_a_slot` as both user *and* password, and README/.env.example advertise the same localhost URL. Fine for a take-home; unacceptable as shipped secrets.
+
+**Next:** read secrets from vault/secrets manager, never from the repo, and rotate them.
+
+## 3. Tokens don't expire and are looked up per request
+
+`users.token` has no TTL, and every authenticated request costs a DB query. Revocation today = set the column to NULL manually.
+
+**Next:** token expiry (store created_at and enforce a max age), a revoke endpoint, and optionally a cache (Redis!) between token lookups.
+
+## 4. Migrations run at container startup
+
+`alembic upgrade head` in the Compose command makes every API replica race to migrate, and puts migration failure in the same blast radius as boot. Widely used for simple deploys, but it is not the "single actor, versioned, reviewed" pattern a fleet needs.
+
+**Next:** a dedicated migration step/job that runs before deploy, with `alembic upgrade head` decoupled from `uvicorn`.
+
+## 5. No worker consumes the queue
+
+`review_summary_jobs` is written but never read. `reviews.summary` is predestined but always NULL. The brief asks only for the trigger, so this is a *purposeful* gap.
+
+**Next:** a worker that `brpop`s the list, summarises (an LLM provider, for example), writes `reviews.summary`, and handles retries/failures (dead-letter and idempotency keys so one review can't be summarised twice).
+
+## 6. No pagination on `GET /bookings`
+
+Real deployments hold many rows; returning the whole role-filtered list unbounded is fine for a take-home, risky later.
+
+**Next:** `limit`/`offset` (or keyset pagination on `id`), still filtered by the role logic — and covered by tests.
+
+## 7. Test realism has limits (stated, not hidden)
+
+- Unit tests use **SQLite** + a **FakeRedis** — great for speed, not a substitute for PostgreSQL semantics (enum types, checks, concurrency locking).
+- The **live test** covers the real stack, but **one** thread sequential flow; no concurrent double-book stress was run.
+- The atomic conditional UPDATE is the *standard correct* pattern and is behaviourally proven, but "proven by tests" ≠ "load-tested at 10,000 RPS".
+
+**Next:** a small concurrency test (two sessions booking the same slot; assert exactly one winner) and a forum that exercises PG-specific matching.
+
+## 8. No observability, rate limiting, or audit
+
+No structured logging, metrics, tracing, or request-rate limits; no audit trail for who did what.
+
+**Next:** structured logs + OpenTelemetry, a reverse-proxy rate limiter, and a bookings audit table.
+
+## The decision log already said "no" to some of these
+
+The repo's design notes record why: JWT was rejected for a DB token (simpler, revocable), a worker was rejected for the M5 scope (stub first), seed data was skipped (brief doesn't ask), and a slot table was rejected (domain doesn't need it). **Each of these gaps is a choice documented in `AGENTS.md`, not an oversight** — and each has a clear upgrade path.
+
+<Callout kind="tip" title="Talking about it in an interview">
+  Say it in three parts: "What we built and why", "what I measured", "what I'd change at scale and the order I'd do it in." This chapter is that third part in one place.
+</Callout>
+
+<QuizCard quizId="production" client:load />

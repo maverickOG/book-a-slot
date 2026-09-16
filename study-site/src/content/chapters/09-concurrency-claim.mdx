@@ -1,0 +1,100 @@
+---
+title: "The concurrency-safe slot claim"
+chapter: 9
+module: "domain"
+order: 9
+summary: "Why 'check then update' can double-book, and how one atomic conditional UPDATE with a rowcount check makes the claim race-free without locks."
+minutes: 11
+prereqs: ["08-booking-lifecycle"]
+tags: ["concurrency", "atomic-update", "race"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+Two customers hit "book" on the same slot within milliseconds. Exactly one must win. The naive version is a **check-then-update** race — and it loses.
+
+## The buggy "obvious" approach
+
+```python
+# DON'T DO THIS
+booking = get_booking(booking_id)
+if booking.status == "pending" and booking.customer_id is None:
+    booking.customer_id = current_user.id   # both customers pass this check
+    booking.status = "confirmed"
+    commit()
+```
+
+Both requests read the row as available, both pass the `if`, both commit. The second overwrites the first. **Double booking.**
+
+Locks would fix it (`SELECT ... FOR UPDATE`), but they need careful transaction management and are easy to get wrong.
+
+## The fix: make the guard part of the UPDATE
+
+The repository's `book_slot` puts the *conditions* into the `WHERE` clause of a single UPDATE:
+
+```python
+result = db.execute(
+    update(Booking)
+    .where(
+        Booking.id == booking.id,
+        Booking.status == BookingStatus.PENDING,
+        Booking.customer_id.is_(None),
+    )
+    .values(customer_id=current_user.id, status=BookingStatus.CONFIRMED)
+)
+if result.rowcount == 0:
+    raise HTTPException(status_code=409, detail="Slot is no longer available")
+```
+
+- The UPDATE only matches a row that is **still** `pending` **and still** unclaimed.
+- On PostgreSQL, an UPDATE takes a row lock and re-evaluates its `WHERE` once the lock is granted — so a losing transaction sees the winner's committed change.
+- `result.rowcount` tells us whether our UPDATE actually claimed the row. `0` means we lost the race → respond <GlossaryTerm term="409 Conflict" label="409" client:load />.
+
+This is the whole trick: **no SELECT first, no lock, no retry loop. One statement, one verdict.**
+
+## Why no `SELECT ... FOR UPDATE`?
+
+With the conditional UPDATE, the DB does the mutual exclusion for us — the row lock is taken during the UPDATE itself, not earlier in a separate transaction. That's less surface area to get wrong (no forgotten locks, no starvation by ordering) and it is the smallest correct implementation.
+
+<Callout kind="tip" title="What the SQL actually looks like">
+  SQLAlchemy emits roughly:
+  <code>UPDATE bookings SET customer_id = :c, status = 'confirmed'
+  WHERE id = :id AND status = 'pending' AND customer_id IS NULL</code>
+  and reports how many rows matched.
+</Callout>
+
+## Same pattern, completion
+
+`complete_booking` mirrors it: `UPDATE ... WHERE status = 'confirmed' AND customer_id IS NOT NULL`. Because completion must not happen on an open slot, the WHERE re-verifies the exact state at lock time.
+
+## Test evidence
+
+`tests/test_bookings.py` proves the double-booking outcome:
+1. Provider opens a slot → `201`.
+2. First customer books → `200`, `customer_id` set.
+3. Second customer books → **409** ("Slot is no longer available").
+
+The same flow is re-run end-to-end against real PostgreSQL + Redis in the CI live test (`tests/test_live.py`), where a second, different customer also receives 409.
+
+<Callout kind="warn" title="Honest scope note">
+  This is proven by <strong>design and by behaviour</strong>, not by a synthetic stress test hammering the server with simultaneous connections. The atomic-conditional-UPDATE pattern is the standard way to solve this exact problem, the unit and live tests demonstrate the one-winner outcome, and no stress test was run. The site will not claim one.
+</Callout>
+
+## When two writes race: Redis is not involved
+
+Booking claims are entirely PostgreSQL — Redis is only for review-summarisation jobs (chapter 10). There is no distributed lock layer anywhere in this project.
+
+<SourceLinks
+  files={[
+    "app/routers/bookings.py",
+    "app/models/booking.py",
+    "tests/test_bookings.py",
+  ]}
+/>
+
+<QuizCard quizId="concurrency" client:load />

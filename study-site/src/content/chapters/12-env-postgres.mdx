@@ -1,0 +1,81 @@
+---
+title: "Environment variables and PostgreSQL wiring"
+chapter: 12
+module: "running"
+order: 12
+summary: "DATABASE_URL, REDIS_URL, RUN_LIVE, the POSTGRES_* bootstrap variables, and how the same code runs locally, in Docker, and in CI."
+minutes: 10
+prereqs: ["02-architecture", "11-docker-basics"]
+tags: ["env", "postgres", "config"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+The application has exactly two configuration inputs — both environment variables read once at import time.
+
+## The two knobs
+
+`app/database.py`:
+
+```python
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg://book_a_slot:book_a_slot@localhost:5432/book_a_slot",
+)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+```
+
+`app/redis_client.py`:
+
+```python
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_client = redis.Redis.from_url(REDIS_URL)
+```
+
+Decode that connection string: **driver** `postgresql+psycopg` (the psycopg 3 driver), **user** / **password** `book_a_slot`, **host** `localhost`, **port** `5432`, **database** `book_a_slot`.
+
+<Callout kind="warn" title="Where does the role come from?">
+  There is <strong>no host-level PostgreSQL account</strong>. When the container <code>postgres:16-alpine</code> first boots, its entrypoint reads <code>POSTGRES_USER</code>, <code>POSTGRES_PASSWORD</code> and <code>POSTGRES_DB</code> from the Compose environment and creates the role and database for you. The app's DATABASE_URL then has something real to connect to.
+</Callout>
+
+## Same code, three environments
+
+| Where | DATABASE_URL host | REDIS_URL host |
+|---|---|---|
+| Your machine (non-Docker) | `localhost:5432` (default) | `localhost:6379` (default) |
+| Docker Compose | `db:5432` (service name) | `redis:6379` (service name) |
+| CI live-smoke job | `localhost:5432` (job service) | `localhost:6379` (job service) |
+
+The app never hard-codes infrastructure — Compose and CI hand it the right URL, so **no application code changes between environments**. That's the payoff of env-driven configuration.
+
+<Callout kind="note" title="The compose file does not read your .env">
+  Docker Compose defines its own service-internal URLs in <code>docker-compose.yml</code>. The <code>.env.example</code> file in the repo documents the localhost defaults "for non-Docker local development". Running the API *without* Docker means having a PostgreSQL and Redis reachable at those defaults (or overriding the variables).
+</Callout>
+
+## The third knob: RUN_LIVE
+
+`tests/test_live.py` is skipped unless `RUN_LIVE=1`:
+
+```python
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_LIVE") != "1",
+    reason="Live smoke test: set RUN_LIVE=1 with reachable PostgreSQL and Redis",
+)
+```
+
+So the *same* file is invisible in a normal `pytest tests -q` run and becomes a full end-to-end test when CI (or you) sets `RUN_LIVE=1` against real services.
+
+## The full env surface, honestly
+
+- `DATABASE_URL` — where PostgreSQL lives (default: localhost).
+- `REDIS_URL` — where Redis lives (default: localhost).
+- `RUN_LIVE` — "1" turns the gated live test on.
+- `POSTGRES_USER/_PASSWORD/_DB` — consumed only by the PostgreSQL container to bootstrap its role/database; the app does not read them.
+
+There is deliberately no separate env file for the API beyond these three. `pool_pre_ping=True` also has your back: every connection is verified alive before use, so a Postgres restart doesn't poison the pool.
+
+<QuizCard quizId="env" client:load />

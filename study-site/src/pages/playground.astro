@@ -1,0 +1,75 @@
+---
+import AppShell from "../layouts/AppShell.astro";
+import RequestSimulator from "../components/interactive/RequestSimulator.tsx";
+import WhichIsReal from "../components/interactive/WhichIsReal.tsx";
+import OrderSteps from "../components/interactive/OrderSteps.tsx";
+import Callout from "../components/ui/Callout.astro";
+---
+
+<AppShell title="Playground · Inside Book a Slot" description="Hands-on, data-driven tools for the Book a Slot API — no backend required.">
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">Playground</p>
+      <h1 class="page-title">Playground</h1>
+      <p class="page-lead">
+        Static, data-driven tools that encode the real API contract — so you can
+        exercise the endpoints <em>without</em> a running backend.
+      </p>
+    </header>
+
+    <Callout kind="note" title="Honest about what this is">
+      These tools <strong>never send network requests</strong>. They replay the contract
+      from <code>app/routers/*.py</code> and the passing tests: exact endpoints, auth
+      requirements, and status codes. To talk to the <em>real</em> API, use the
+      <code>docker compose up</code> stack and <code>http://localhost:8000/docs</code>.
+    </Callout>
+
+    <RequestSimulator client:load />
+
+    <WhichIsReal
+      file="app/routers/bookings.py"
+      correct={`result = db.execute(
+    update(Booking)
+    .where(
+        Booking.id == booking.id,
+        Booking.status == BookingStatus.PENDING,
+        Booking.customer_id.is_(None),
+    )
+    .values(customer_id=current_user.id, status=BookingStatus.CONFIRMED)
+)
+if result.rowcount == 0:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Slot is no longer available",
+    )`}
+      wrong={`booking = db.get(Booking, booking_id)
+if booking.status != BookingStatus.PENDING or booking.customer_id is not None:
+    raise HTTPException(status_code=409, detail="Already taken")
+booking.customer_id = current_user.id
+booking.status = BookingStatus.CONFIRMED
+db.commit()`}
+      wrongReason="The repo's real code is the atomic conditional UPDATE with a rowcount verdict — NOT a check-then-update, which can double-book two requests that both pass the 'if' before either commits."
+      client:load
+    />
+
+    <OrderSteps
+      title="Which order does a review request actually hit? (harder)"
+      steps={[
+        "get_current_user parses the bearer token",
+        "404 if the booking does not exist",
+        "409 if the booking isn't completed",
+        "403 if you aren't the booking's customer",
+        "409 if the booking is already reviewed",
+        "201 Created with the stored review",
+      ]}
+      explanation="State still beats authorship: the 409-for-not-completed fires before the author check, so a stranger learns nothing about who owns an uncompleted booking."
+      shuffleSeed={11}
+      client:load
+    />
+
+    <p class="mt-6 text-sm text-slate-500">
+      Want more of these? Chapters 19 and 13 explain how they're built and why they're
+      grounded in tests. Head to the <a href="/quiz-hub" class="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2">Quiz hub</a> for the full self-check set.
+    </p>
+  </article>
+</AppShell>

@@ -1,0 +1,97 @@
+---
+title: "The booking lifecycle: slot → book → complete"
+chapter: 8
+module: "domain"
+order: 8
+summary: "How a provider opens a slot, a customer claims it, and the provider completes it, with the real code that handles each state transition."
+minutes: 14
+prereqs: ["07-rbac"]
+tags: ["bookings", "state", "lifecycle"]
+---
+
+import RequestFlow from "../../components/diagrams/RequestFlow.tsx";
+import StatusStateMachine from "../../components/diagrams/StatusStateMachine.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+A slot is not a separate entity — it is a bookings row in the `pending` state with no customer attached. The lifecycle has just three meaningful transitions, and each one is guarded.
+
+<StatusStateMachine client:load />
+
+## The full journey, step by step
+
+<RequestFlow
+  title="Provider → slot → booking → review"
+  steps={[
+    { title: "Provider opens slot", method: "POST /bookings", detail: "Provider sends { starts_at, ends_at }. A bookings row is created with status 'pending' and customer_id NULL. 201." },
+    { title: "Customer sees available slots", method: "GET /bookings?status=pending", detail: "Customer queries pending slots. For customers, the list_bookings branch adds customer_id IS NULL, so they only see unclaimed slots — not any other customer's bookings." },
+    { title: "Customer books", method: "POST /bookings/{id}/book", detail: "The atomic UPDATE sets status=confirmed and customer_id=you, but only if the WHERE still matches. 200 if successful; 409 if someone else got it first." },
+    { title: "Provider completes", method: "POST /bookings/{id}/complete", detail: "Only owner or admin. The conditional UPDATE moves confirmed → completed. Only then can a review be created." },
+  ]}
+  client:load
+/>
+
+## The key endpoint: `POST /bookings/{id}/book`
+
+```python
+@router.post("/{booking_id}/book", response_model=BookingResponse)
+def book_slot(booking_id, db, current_user=Depends(require_customer)):
+    booking = get_booking_or_404(booking_id, db)
+    result = db.execute(
+        update(Booking).where(
+            Booking.id == booking.id,
+            Booking.status == BookingStatus.PENDING,
+            Booking.customer_id.is_(None),
+        ).values(customer_id=current_user.id, status=BookingStatus.CONFIRMED)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=409, detail="Slot is no longer available")
+```
+
+Three things happen in one shot: the id is re-checked, the status is confirmed still pending, and the customer_id is confirmed still NULL. Chapter 9 unpacks the concurrency story behind `rowcount == 0`.
+
+## Listing is role-filtered
+
+`GET /bookings` branches per role before querying:
+- **Admin** — no filter, sees all.
+- **Provider** — `WHERE provider_id = current_user.id`.
+- **Customer** — either your own bookings, or (when `?status=pending`) only slots with `customer_id IS NULL`. That lets customers discover available slots without ever seeing another customer's booking.
+
+## PUT and DELETE are restricted to open slots
+
+Both require `owner_or_admin` and both guard: `status == pending AND customer_id IS NULL`. Once a booking is claimed (`confirmed`), the provider cannot reschedule, and the customer cannot throw it away — the row is now a real booking with consequences.
+
+<Callout kind="note" title="No cancellations today">
+  <code>cancelled</code> exists in the enum but no endpoint sets it. The only way a booking disappears physically is DELETE — and only when it's still an open slot. This is a deliberate scope decision, not an oversight.
+</Callout>
+
+## Complete transitions are state-gated
+
+`POST /bookings/{id}/complete` uses the same conditional UPDATE pattern:
+
+```python
+result = db.execute(
+    update(Booking).where(
+        Booking.id == booking.id,
+        Booking.status == BookingStatus.CONFIRMED,
+        Booking.customer_id.is_not(None),
+    ).values(status=BookingStatus.COMPLETED)
+)
+if result.rowcount == 0:
+    raise HTTPException(status_code=409, detail="Booking is not in a state that can be completed")
+```
+
+A pending slot can't be completed — only a confirmed booking with a customer. This preserves the review requirement: only completed bookings are reviewable, and the state change is atomic.
+
+<SourceLinks
+  files={[
+    "app/routers/bookings.py",
+    "app/models/booking.py",
+  ]}
+/>
+
+<QuizCard quizId="booking-flow" client:load />

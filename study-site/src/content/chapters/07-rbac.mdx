@@ -1,0 +1,95 @@
+---
+title: "Role-based access control and ownership"
+chapter: 7
+module: "identity"
+order: 7
+summary: "How the role gates (admin, provider, customer) and object-level helpers enforce who may do what, and how it could grow to support a fourth role or organisations."
+minutes: 12
+prereqs: ["06-authentication"]
+tags: ["rbac", "roles", "ownership", "403"]
+---
+
+import RoleMatrix from "../../components/diagrams/RoleMatrix.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+Roles are checked in two layers. The **route level** (via FastAPI dependencies) answers: "is this the right kind of person at all?" The **object level** (plain helper functions called inside the endpoint body) answers: "is it *your* record?"
+
+## Route-level: role dependencies
+
+`app/security.py` defines three tiny dependencies — each is a function that succeeds or raises <Pill tone="rose">403</Pill>:
+
+```python
+def require_provider(current_user: User = Depends(get_current_user)) -> User:
+    """Return the current user when their role is provider, else 403."""
+    if current_user.role != UserRole.PROVIDER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Provider role required",
+        )
+    return current_user
+```
+
+Because these are themselves `Depends`, their 403 fires **before** body validation — a useful fact if someone hits a provider-only route with a broken body; you get the <Pill tone="rose">403</Pill>, not the <Pill tone="indigo">422</Pill>.
+
+## Object-level: plain helpers, not dependencies
+
+For booking endpoints the role is fine (the right *kind* of user), but the record may still not be theirs. The endpoint calls a helper function explicitly:
+
+```python
+def require_owner_or_admin(booking: Booking, current_user: User) -> User:
+    if current_user.role != UserRole.ADMIN and booking.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission")
+    return current_user
+```
+
+These are plain functions, not `Depends` — the call lives inside the function body because the 404 must happen first (the booking may not exist).
+
+## The permission matrix
+
+<RoleMatrix client:load />
+
+Callout on the numbers:
+
+- **Admin** can do almost everything but *cannot* book slots or review them — `require_customer` rejects roles that aren't `customer`.
+- **Provider** opens and completes their own slots.
+- **Customer** books, then reviews their own completed booking.
+
+This is by design: customers are the only people who *experience* the service directly, and only they write reviews.
+
+<Callout kind="tip" title="A dead helper that wasn't dead after all">
+  <code>require_booking_customer</code> (403 unless <code>booking.customer_id == user.id</code>) was deliberately omitted in M4 because no route needed it yet. Reviews in M5 made it necessary — and it now guards both review creation and summarisation. Holding a security helper back as dead code and then adding it only when a real caller needs it is a reasonable, explainable choice.
+</Callout>
+
+## Signing up as admin? Still a customer
+
+The signup route hard-codes `role=UserRole.CUSTOMER`. Even if the JSON body contained `{"role":"admin"}`, Pydantic silently ignores the extra field (the `SignupRequest` model only declares `email` and `password`). Role upgrades can only happen directly in the database, or via seed data — never through the public API.
+
+## How it could support a fourth role or nested organisations
+
+### Fourth role (e.g. `support`)
+
+- Add `"support"` to `UserRole` StrEnum in `app/models/enums.py`.
+- Alembic automatically picks up the new enum value via `Base.metadata`.
+- A `require_support` dependency follows the same pattern.
+- Route-level: wire it into whatever new endpoints a `support` role needs.
+- Ownership-level: decide what object-level access `support` gets (see all? write notes?).
+
+No new table needed. Three lines of functional code plus a migration.
+
+### Nested organisations (multi-tenant)
+
+This is the bigger change — the current schema is flat, and every access check assumes you own your own records. An org introduces:
+
+- An `organisations` table and an `org_memberships` (user_id, org_id, role) join table.
+- Every booking gains an `org_id` and belongs to one org.
+- All ownership helpers shift: "is provider" → "is provider *in the same org*"?
+- An `is_owner_of_the_booking_and_same_org` pattern replaces the current flat checks.
+
+The existing dependency structure (`Depends` → role check → ownership helper) carries this cleanly: the shape is right; only the helper internals change. No routing rewrites needed, just new helper logic and richer queries.
+
+<QuizCard quizId="rbac" client:load />

@@ -1,0 +1,105 @@
+---
+import AppShell from "../layouts/AppShell.astro";
+import { allChapters, chaptersByModule } from "../lib/chapters";
+
+const chapters = await allChapters();
+const grouped = chaptersByModule(chapters);
+const totalMinutes = chapters.reduce((sum, c) => sum + c.minutes, 0);
+---
+
+<AppShell
+  title="Inside Book a Slot · Understand the whole project"
+  description="A code-grounded study guide to the FastAPI assessment: 20 chapters walk through the real Book a Slot repository from zero."
+>
+  <section class="mb-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+    <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-indigo-50 via-amber-50/60 to-white p-8">
+      <p class="mb-3 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-indigo-700">
+        <span class="h-2 w-2 rounded-full bg-indigo-600" /> Bodhrik take-home companion
+      </p>
+      <p class="text-sm font-medium text-indigo-700">A code-grounded study guide to the FastAPI assessment.</p>
+      <h1 class="mt-2 max-w-xl text-4xl font-bold tracking-tight text-slate-900">
+        Understand the whole
+        <span class="text-indigo-700">Book a Slot</span> project — from zero.
+      </h1>
+      <p class="mt-4 max-w-xl text-lg leading-relaxed text-slate-600">
+        20 chapters walk through the real FastAPI + PostgreSQL + Redis + Docker
+        repository. Every claim is grounded in frozen copies of the actual code —
+        nothing invented, nothing inherited from a template.
+      </p>
+      <div class="mt-6 flex flex-wrap gap-3">
+        <a href="/start" class="btn btn-primary">
+          How to study this
+        </a>
+        <a href="/chapters/01-overview" class="btn btn-secondary">
+          Start with chapter 01 →
+        </a>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-3 lg:grid-cols-1">
+      {[
+        { n: "20", label: "chapters", sub: "7–14 minutes each" },
+        { n: "9", label: "modules", sub: "from big picture to production gaps" },
+        { n: `${totalMinutes}+`, label: "minutes total", sub: "plus quizzes and labs" },
+      ].map((s) => (
+        <div class="rounded-2xl border border-slate-200 bg-white p-4">
+          <p class="text-3xl font-bold tracking-tight text-indigo-700">{s.n}</p>
+          <p class="mt-1 text-sm font-semibold text-slate-800">{s.label}</p>
+          <p class="text-xs text-slate-500">{s.sub}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section>
+    <div class="mb-5 flex items-baseline justify-between gap-3">
+      <h2 class="text-2xl font-bold tracking-tight text-slate-900">The path</h2>
+      <p class="text-sm text-slate-500">
+        {chapters.length} chapters · read in order, or jump by module
+      </p>
+    </div>
+
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {grouped.map((g) => (
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+          <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            {g.module.number}
+          </p>
+          <h3 class="mt-1 text-lg font-bold text-slate-900">{g.module.label}</h3>
+          <p class="mb-4 mt-1 text-sm text-slate-500">{g.module.blurb}</p>
+          <ol class="space-y-1.5">
+            {g.items.map((c) => (
+              <li>
+                <a
+                  href={`/chapters/${c.id}`}
+                  class="group flex items-baseline gap-2 rounded-lg px-2 py-1 text-sm transition-colors hover:bg-indigo-50"
+                >
+                  <span class="font-mono text-xs tabular-nums text-slate-400">
+                    {String(c.chapter).padStart(2, "0")}
+                  </span>
+                  <span class="text-slate-700 group-hover:text-indigo-800">{c.title}</span>
+                  <span class="ml-auto whitespace-nowrap text-[11px] text-slate-400">
+                    {c.minutes} min
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="mt-10 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-6">
+    <h2 class="text-xl font-bold text-slate-900">The promise</h2>
+    <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-700">
+      The repository this site documents is a real, working, CI-verified assessment:
+      <strong class="font-semibold">
+        53 unit tests passing, a live smoke test against real PostgreSQL 16 + Redis 7,
+        Docker Compose, GitHub Actions, and a documented design log.
+      </strong>
+      Use this site to actually understand it — then you can explain it, extend it,
+      and defend it in an interview.
+    </p>
+  </section>
+</AppShell>

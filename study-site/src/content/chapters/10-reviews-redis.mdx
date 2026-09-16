@@ -1,0 +1,130 @@
+---
+title: "Reviews and the Redis queue"
+chapter: 10
+module: "domain"
+order: 10
+summary: "Who can review what, the ordering of rejection checks, and why summarisation is an honest queue-only stub with no worker and no AI."
+minutes: 12
+prereqs: ["08-booking-lifecycle"]
+tags: ["reviews", "redis", "queue"]
+---
+
+import QueueVisual from "../../components/diagrams/QueueVisual.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+Two routes complete the domain. `POST /reviews` creates a review; `POST /reviews/{id}/summarize` enqueues a background summarisation job.
+
+<QueueVisual client:load />
+
+## Creating a review: three rules, checked in order
+
+<Cite path="app/routers/reviews.py" lines="39–75" />
+
+```python
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=ReviewResponse)
+def create_review(
+    payload: ReviewCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer),
+) -> Review:
+    booking = get_booking_or_404(payload.booking_id, db)
+    if booking.status != BookingStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only completed bookings can be reviewed",
+        )
+    require_booking_customer(booking, current_user)
+    already_reviewed = db.scalar(
+        select(Review.id).where(Review.booking_id == booking.id)
+    )
+    if already_reviewed is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This booking has already been reviewed",
+        )
+    review = Review(
+        booking_id=booking.id,
+        rating=payload.rating,
+        comment=payload.comment,
+    )
+    db.add(review)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This booking has already been reviewed",
+        ) from None
+    db.refresh(review)
+    return review
+```
+
+The order of rejects is deliberate:
+
+1. **404** — booking doesn't exist.
+2. **409** — booking isn't `completed`. Checked *before* authorship, so nobody's pending/confirmed/cancelled booking leaks "am I the customer?" info to a stranger.
+3. **403** — caller isn't the booking's customer (`require_booking_customer`).
+4. **409** — already reviewed. The UNIQUE constraint on `booking_id` is the backstop; the `IntegrityError` catch turns an unavoidable race into a clean 409 instead of a 500.
+
+<Callout kind="warn" title="Who can review">
+  Only <strong>the customer who booked the slot</strong>, and only after the provider completed it. In tests, another customer and the provider both get 403. There is no provider review and no self-review.
+</Callout>
+
+## Rate validation is free
+
+Pydantic's `Field(ge=1, le=5)` on `rating` rejects anything outside 1–5 with a 422 before the function runs — matching the database's `CHECK (rating BETWEEN 1 AND 5)`.
+
+## Summarising: a stub that still keeps its promise
+
+`POST /reviews/{id}/summarize` (202) is deliberately minimal:
+
+```python
+REVIEW_SUMMARY_JOBS_KEY = "review_summary_jobs"
+
+@router.post(
+    "/{review_id}/summarize",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SummarizeResponse,
+)
+def summarize_review(
+    review_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer),
+    queue: redis.Redis = Depends(get_redis_client),
+) -> SummarizeResponse:
+    review = db.get(Review, review_id)
+    if review is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review not found",
+        )
+    require_booking_customer(review.booking, current_user)
+    queue.rpush(REVIEW_SUMMARY_JOBS_KEY, json.dumps({"review_id": review.id}))
+    return SummarizeResponse(status="queued", review_id=review.id)
+```
+
+It returns **202 Accepted**, meaning "your job is queued, not done". The job? `rpush` of the exact payload `{"review_id": N}` onto the Redis list `review_summary_jobs`. That is the entire contract.
+
+<Callout kind="danger" title="No worker, no AI — do not assume more">
+  Nothing in this repository consumes that queue, and nothing writes <code>reviews.summary</code>. A future worker would <code>lpop</code>/<code>brpop</code> the list, do the summarisation, and store the result in the (already nullable) <code>summary</code> column. Building that worker, retry logic, and an AI provider is explicitly out of scope — chapter 17 lists it as production work.
+</Callout>
+
+## Why `require_booking_customer` exists at all
+
+Summarisation is **author-only** — the same customer who wrote the review. This mirrors the rule controlling who writes reviews in the first place, and it is why a security helper intentionally deferred from Milestone 4 became genuinely required by Milestone 5. The live test cross-checks: submitting a review for a booking you don't own returns 403.
+
+<SourceLinks
+  files={[
+    "app/routers/reviews.py",
+    "app/redis_client.py",
+    "app/models/review.py",
+  ]}
+/>
+
+<QuizCard quizId="reviews" client:load />

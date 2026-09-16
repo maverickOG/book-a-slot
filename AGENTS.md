@@ -1062,6 +1062,30 @@ Rotating external credentials and rewriting git history.
 No qualifying credential was found to rotate, and destructive history rewriting
 for an unverified alert is unnecessary and high-risk.
 
+### 2026-09-16 Study site tracked and pushed with the parent repository
+
+**Decision:**
+Track `study-site/` (the "Inside Book a Slot" frontend) directly in this parent
+repository and push it to GitHub along with the assessment code. The study site
+is no longer ignored by `.gitignore` and is no longer an independent repo; its
+nested `.git` was removed so its files are committed normally here.
+
+**Reason:**
+The study site's standalone GitHub repository
+(`https://github.com/maverickOG/inside-book-a-slot`) is private, so the built
+frontend could not be accessed. The developer wants the study-site frontend
+pushed to this public repository so it is reachable on GitHub.
+
+**Alternative considered:**
+Keeping the study site as a separate repository (its original design) and only
+pushing it to its private remote.
+
+**Why rejected:**
+A private remote does not make the frontend accessible. Registering the nested
+repo as a gitlink/submodule would upload only a commit pointer, not the site's
+files, which also fails the "access the frontend" goal. Folding the files in
+gives the public repo the actual source.
+
 ---
 
 # 11. Lessons Learned
@@ -1638,6 +1662,22 @@ Format:
 - Verification: Targeted pytest on `tests/test_secret_patterns.py` and Ruff on
   the new test file.
 - Commit: Pending in current branch.
+
+### 2026-09-16 study site folded into the parent repository
+
+- Changed: Removed `study-site/` from `.gitignore`; deleted the nested
+  `study-site/.git` so the parent repo tracks the study-site frontend files;
+  updated `AGENTS.md` (this file) with the new decision and `study-site/AGENTS.md`
+  with the new boundaries; committed and pushed all study-site source files to
+  the public `book-a-slot` remote so the frontend is reachable on GitHub.
+- Reason: The study site's own GitHub repository is private, so the frontend
+  was inaccessible. Folding it into the public parent repo makes it reachable.
+  A gitlink/submodule would have uploaded only a commit pointer, not the files.
+- Verification: `git check-ignore` no longer excludes `study-site`; staged files
+  inspected to confirm only source (no `node_modules/`, `dist/`, `.astro/`, or
+  test artifacts, which are still git-ignored by `study-site/.gitignore`);
+  ruff/pytest are unaffected (no app, test, migration, Docker, or CI changes).
+- Commit: see the git log.
 
 ---
 

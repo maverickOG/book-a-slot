@@ -1,0 +1,106 @@
+---
+title: "Testing: 53 reasons to trust it"
+chapter: 13
+module: "confidence"
+order: 13
+summary: "Unit tests on SQLite + a FakeRedis, the gated live test, and how dependency overrides let tests fake one thing at a time."
+minutes: 13
+prereqs: ["03-python-fastapi-basics", "12-env-postgres"]
+tags: ["pytest", "testclient", "dependency-override"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+The suite splits into two parts:
+
+- **53 unit tests** run anywhere with no servers needed.
+- **1 live test** runs only when `RUN_LIVE=1` — against real PostgreSQL and Redis.
+
+## The trick that makes unit tests cheap: dependency overrides
+
+Instead of a real database, `tests/conftest.py` builds an in-memory SQLite database and *swaps* the `get_db` dependency. FastAPI makes this trivial:
+
+<Cite path="tests/conftest.py" lines="24–52" />
+
+```python
+@pytest.fixture()
+def session_factory():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    testing_session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    yield testing_session_factory
+    Base.metadata.drop_all(engine)
+
+@pytest.fixture()
+def client(session_factory):
+    def override_get_db():
+        db = session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+```
+
+- The `override_get_db` closure replaces the real session factory **just for this test run**, with a fixture that cleans up afterwards.
+- `StaticPool` makes every connection share the same in-memory database — otherwise SQLite would give each connection a fresh empty DB.
+- <GlossaryTerm term="TestClient" label="TestClient" client:load /> runs the whole FastAPI app in-process; tests call `client.post("/auth/signup", json=...)` like a real client.
+
+Redis is faked the same way — `tests/conftest.py` defines a `FakeRedis` recording pushes, and the `fake_redis` fixture overrides `get_redis_client`:
+
+```python
+class FakeRedis:
+    """Minimal in-memory Redis stand-in recording list pushes for tests."""
+    def __init__(self) -> None:
+        self.lists: dict[str, list[str]] = {}
+    def rpush(self, key: str, value: str) -> None:
+        self.lists.setdefault(key, []).append(value)
+```
+
+<Callout kind="tip" title="Trade-off, stated honestly">
+  SQLite + FakeRedis are <strong>test doubles, documented as doubles</strong>. PostgreSQL remains the only real target. That is why the live test exists: it re-proves the same flows against the real stack in CI (run 34573662242 — all three jobs passed).
+</Callout>
+
+## What the 53 tests actually cover
+
+| File | Proves |
+|---|---|
+| `test_auth.py` (9) | signup, duplicate email, login success/failure, `/auth/me` with missing/invalid/valid tokens, role-escalation guard |
+| `test_security.py` | role dependencies in isolation (in-memory User objects) |
+| `test_bookings.py` (18) | creation, role isolation, availability, booking, double-book 409, completion, forbidden access, invalid IDs, time ordering, state guards |
+| `test_reviews.py` (13) | valid creation, rejection per state, author/provider 403s, duplicate 409, rating 422, exact Redis queue payload |
+| `test_database.py` | PostgreSQL dialect, registered tables, session construction |
+| `test_main.py` (1) | root endpoint |
+
+## The live test is the whole story in one function
+
+`tests/test_live.py` (gated by `RUN_LIVE=1`): applies `alembic upgrade head` to the real database, waits for services, then walks the entire journey — provider creates slot → customer sees it → books → double-book gets 409 → provider completes → review created → duplicate review 409 → other-customer 403 → provider 403 → summarize enqueues → real Redis `LRANGE review_summary_jobs` contains `{"review_id": N}`.
+
+```python
+raw_value = redis_client.lrange("review_summary_jobs", -1, -1)[0]
+assert json.loads(raw_value) == {"review_id": review_id}
+```
+
+If that assertion passes, the queue contract is *measured against the real Redis*, not assumed.
+
+<Callout kind="note" title="Quality gates">
+  <strong>Ruff</strong> (a fast linter) checks <code>app tests alembic</code> with rules <code>E, F, I</code> (errors, undefined names, import order). CI fails the build on any Ruff or pytest failure.
+</Callout>
+
+<SourceLinks
+  files={[
+    "tests/conftest.py",
+    "tests/test_bookings.py",
+    "tests/test_live.py",
+  ]}
+/>
+
+<QuizCard quizId="testing" client:load />

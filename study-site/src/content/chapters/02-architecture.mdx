@@ -1,0 +1,102 @@
+---
+title: "Architecture: a tour of the moving parts"
+chapter: 2
+module: "big-picture"
+order: 2
+summary: "Client → FastAPI → PostgreSQL + Redis, all orchestrated by Docker Compose. Learn what talks to what, and where the code for each piece lives."
+minutes: 12
+prereqs: ["01-overview"]
+tags: ["architecture", "fastapi", "docker", "redis"]
+---
+
+import ArchitectureDiagram from "../../components/diagrams/ArchitectureDiagram.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+The system is a classic three-service web app, with every service defined in one repository and started by one command.
+
+<ArchitectureDiagram client:load />
+
+## Who talks to whom
+
+- A **client** (curl, a browser later, or FastAPI's `TestClient` in tests) sends HTTP requests with JSON bodies and a bearer token when authenticated.
+- The **FastAPI app** validates the request, runs authorization checks, and does database work through SQLAlchemy. It only talks to Redis when a review is summarised.
+- **PostgreSQL** is the single source of truth: users, bookings, reviews.
+- **Redis** is used as a work queue only — the review-summarisation job list. Nothing reads that list back in this project.
+
+## Compose puts the pieces together
+
+`docker-compose.yml` describes three services: `db` (PostgreSQL 16), `redis` (Redis 7), and `api` (built from the repo's `Dockerfile`). Compose guarantees ordering: the API container starts **only after** both `db` and `redis` report healthy, and the API's own command runs `alembic upgrade head` *before* starting uvicorn, so migrations always happen before traffic arrives.
+
+<Cite path="docker-compose.yml" lines="28–46" />
+
+```yaml
+api:
+  build: .
+  environment:
+    DATABASE_URL: postgresql+psycopg://book_a_slot:book_a_slot@db:5432/book_a_slot
+    REDIS_URL: redis://redis:6379/0
+  ports:
+    - "8000:8000"
+  command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+```
+
+## Where the moving parts live in the repo
+
+```
+app/
+├── main.py            # creates the FastAPI app, includes the 3 routers
+├── database.py        # engine + session factory + get_db dependency (reads DATABASE_URL)
+├── redis_client.py    # module-level Redis client (reads REDIS_URL)
+├── security.py        # password hashing, get_current_user, role & ownership checks
+├── models/            # SQLAlchemy models (User, Booking, Review) + enums
+└── routers/           # auth.py, bookings.py, reviews.py
+```
+
+<Callout kind="note" title="Two files you might expect but that don't exist here">
+  There is no <code>app/config.py</code> and no loose <code>app/enums.py</code>. Configuration is split between <code>app/database.py</code> and <code>app/redis_client.py</code>; the role/status enums live in <code>app/models/enums.py</code>. The site reflects the real layout, not a conventional one.
+</Callout>
+
+## The entry point
+
+Everything starts from `app/main.py`:
+
+<Cite path="app/main.py" />
+
+```python
+from fastapi import FastAPI
+
+from app.routers.auth import router as auth_router
+from app.routers.bookings import router as bookings_router
+from app.routers.reviews import router as reviews_router
+
+app = FastAPI(title="Book a Slot")
+
+app.include_router(auth_router)
+app.include_router(bookings_router)
+app.include_router(reviews_router)
+
+@app.get("/")
+def read_root() -> dict[str, str]:
+    """Return a simple response confirming that the API is available."""
+    return {"message": "Book a Slot API is running"}
+```
+
+The routers carry their own URL prefixes (`/auth`, `/bookings`, `/reviews`), so three small files stay readable instead of one long one.
+
+## Config flows through the environment
+
+The app never hard-codes credentials. `app/database.py` reads `DATABASE_URL` (with a localhost default for convenience) and `app/redis_client.py` reads `REDIS_URL`. In Docker, Compose supplies the URLs with service hostnames (`db`, `redis`) instead of `localhost`; on CI, the workflow injects them too. Chapter 12 details this.
+
+<Callout kind="tip" title="Mental model for the rest of the site">
+  Ask three questions of any feature: <strong>which router owns it?</strong>, <strong>which database rows change?</strong>, and <strong>which check runs first?</strong>. Answering these is the fast path through every later chapter.
+</Callout>
+
+<QuizCard quizId="architecture" client:load />
