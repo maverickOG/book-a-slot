@@ -1,0 +1,110 @@
+---
+title: "The data layer: models, constraints, normalisation"
+chapter: 4
+module: "data"
+order: 4
+summary: "How SQLAlchemy classes describe users, bookings and reviews in PostgreSQL, why there is no 'slots' table, and which constraints keep the data honest."
+minutes: 15
+prereqs: ["02-architecture"]
+tags: ["sqlalchemy", "postgres", "schema", "normalisation"]
+---
+
+import SchemaDiagram from "../../components/diagrams/SchemaDiagram.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+Every table is declared once — as a Python class — in `app/models/`. SQLAlchemy turns those classes into real PostgreSQL DDL, and Alembic keeps the running database in sync.
+
+<SchemaDiagram client:load />
+
+## Reading a model: `User`
+
+<Cite path="app/models/user.py" />
+
+```python
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    token: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(
+            UserRole,
+            name="user_role",
+            values_callable=lambda enum: [member.value for member in enum],
+        )
+    )
+```
+
+- `<GlossaryTerm term="mapped_column" client:load />` + `Mapped[T]` is SQLAlchemy 2.x style for "this class attribute is a column".
+- `Mapped[str | None]` means nullable; `nullable=True` makes it explicit.
+- `role` is a real **PostgreSQL enum** named `user_role`, defined in `app/models/enums.py` from a Python `StrEnum`.
+- `unique=True` becomes a UNIQUE constraint; `index=True` becomes an index for fast lookups.
+
+## Why there is no "slots" table (normalisation)
+
+The brief names Users, Bookings, and Reviews — not Slots. The insight is that a **slot and a booking are the same row in different states**:
+
+| business state | bookings row |
+|---|---|
+| Provider opened a slot | `status = pending`, `customer_id = NULL` |
+| Customer claimed it | `status = confirmed`, `customer_id = 3` |
+| Finished work | `status = completed` |
+
+Adding a separate `slots` table would duplicate the same provider/time interval and force you to keep two tables consistent — a classic denormalisation smell. The one-table design satisfies <GlossaryTerm term="normalisation" label="normalisation" client:load /> because nothing is needlessly repeated, and every fact (who, when, what state) lives in one place.
+
+<Callout kind="warn" title="So why is customer_id nullable at all?">
+  Initially the migration even made it NOT NULL. The domain caught the mistake: <em>"providers offer time slots, customers book them"</em> means a provider must be able to create a slot with <strong>no customer yet</strong>. Migration <code>0002</code> relaxed the column. NULL here is meaningful, not sloppy.
+</Callout>
+
+## Booking constraints do real work
+
+`app/models/booking.py` adds a database-level check, plus indexes on the foreign keys and status that queries filter on:
+
+```python
+__table_args__ = (
+    CheckConstraint("ends_at > starts_at", name="ck_bookings_end_after_start"),
+)
+```
+
+Both `provider_id` and `customer_id` use `ForeignKey("users.id", ondelete="RESTRICT")`. <GlossaryTerm term="RESTRICT" label="RESTRICT" client:load /> means PostgreSQL will **refuse to delete a user** while bookings still reference them — no dangling rows, enforced by the database, not by our code.
+
+## Reviews are one-per-booking at the schema level
+
+```python
+class Review(Base):
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="RESTRICT"), unique=True, index=True
+    )
+    rating: Mapped[int] = mapped_column()
+    comment: Mapped[str] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+```
+
+- `unique=True` on `booking_id` is the guarantee: **at most one review per booking**.
+- `rating` is an integer constrained to 1–5 (`CheckConstraint("rating BETWEEN 1 AND 5")`).
+- `summary` exists from day one as a **nullable** column — reserved for a future summarisation worker that never arrives in this assessment's scope. It stays NULL today.
+
+<Callout kind="tip" title="Defence in depth, twice">
+  One review per booking is enforced at <strong>three</strong> layers: the UNIQUE constraint, a pre-check SELECT in the router, and a catch of <code>IntegrityError</code> on commit. Each layer alone is fine; together they survive races and serve a clean 409 to the API caller.
+</Callout>
+
+## Where the schema is decided: migrations, not models
+
+The models describe the *target*; the **migrations** describe the *journey* and are the authoritative record that actually runs against PostgreSQL (`alembic upgrade head`). They also contain edits history shows, like `customer_id` becoming nullable. Chapter 5 covers that chain in detail.
+
+<SourceLinks
+  files={[
+    "app/models/booking.py",
+    "app/models/review.py",
+    "app/models/user.py",
+  ]}
+/>
+
+<QuizCard quizId="database" client:load />

@@ -1,0 +1,89 @@
+---
+import AppShell from "../layouts/AppShell.astro";
+import Callout from "../components/ui/Callout.astro";
+import { allChapters, chaptersByModule } from "../lib/chapters";
+
+const chapters = await allChapters();
+const grouped = chaptersByModule(chapters);
+---
+
+<AppShell title="How to study this · Inside Book a Slot" description="A practical study plan for Inside Book a Slot — a code-grounded study guide to the FastAPI assessment.">
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">Before you begin</p>
+      <h1 class="page-title">How to study this site</h1>
+      <p class="page-lead">
+        A code-grounded study guide to the FastAPI assessment. It pays off in the order it's designed.
+      </p>
+    </header>
+
+    <h2>Who this is for</h2>
+    <p>
+      You are comfortable with JavaScript, TypeScript, React, Node.js and REST APIs, but you have
+      limited recent hands-on experience with Python backends. This site assumes exactly that:
+      it explains Python and FastAPI concepts as they appear, always anchored to real files in the
+      repository.
+    </p>
+
+    <h2>The suggested rhythm</h2>
+    <ul>
+      <li><strong>One chapter per sitting</strong> — each is 7–14 minutes plus a quiz. Stop at the quiz.</li>
+      <li><strong>Read, then play.</strong> Every chapter ends in a self-check. Replay the ones you miss tomorrow.</li>
+      <li><strong>Follow the module order.</strong> It is sequenced: orientation → language → data → identity → domain → running → confidence → reference → beyond.</li>
+    </ul>
+
+    <h2>If you have very little time</h2>
+    <p class="lead">
+      To survive a technical conversation about this project, read chapters 8, 9 and 10 —
+      they contain the decisions that actually matter: the slot lifecycle, the concurrency-safe
+      claim, and the review/Redis queue.
+    </p>
+
+    <h2>What is real here (the ground rules)</h2>
+    <ul>
+      <li>Every code block is a <strong>frozen copy</strong> from <code>src/code-snapshots</code>, taken at the verified commits.</li>
+      <li>Every claim is checked against the repo. Where the site says "this isn't implemented", it means the repository does not do it — e.g. no Redis worker, no concurrent stress test.</li>
+      <li>Where a design is a deliberate assessment choice (a pending slot <em>is</em> a bookings row; tokens are stored in the DB), the <em>why</em> is explained from the repo's own decision log.</li>
+    </ul>
+
+    <Callout kind="note" title="This site runs independently">
+      Source lives entirely under <code>study-site/</code>, is ignored by Git, and never touches the
+      assessment repo. It is a learning aid — not part of the submission.
+    </Callout>
+
+    <h2>The 20 chapters, by module</h2>
+    {grouped.map((g) => (
+      <div class="rounded-xl border border-slate-200 bg-white p-4">
+        <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">{g.module.number}</p>
+        <h3 class="mt-1 text-lg font-bold text-slate-900">{g.module.label}</h3>
+        <ol class="mt-2 space-y-1">
+          {g.items.map((c) => (
+            <li class="text-sm">
+              <a href={`/chapters/${c.id}`} class="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900">
+                {String(c.chapter).padStart(2, "0")} · {c.title}
+              </a>
+              <span class="text-slate-500"> — {c.summary}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    ))}
+
+    <h2>When should I stop reading and start doing?</h2>
+    <p>
+      After chapter 11. Fire up the real stack and run the labs at the end of chapter 20.
+      The fast way to confuse yourself: try to build a small change (e.g. add a
+      <code>cancelled</code> endpoint) and see how each chapter's reasoning blocks or
+      enables it. Making — then debugging — that attempt beats re-reading repeatedly.
+    </p>
+
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/chapters/01-overview" class="btn btn-primary">
+        Begin at chapter 01
+      </a>
+      <a href="/playground" class="btn btn-secondary">
+        Skip to the playground
+      </a>
+    </div>
+  </article>
+</AppShell>

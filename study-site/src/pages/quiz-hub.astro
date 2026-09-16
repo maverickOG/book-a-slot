@@ -1,0 +1,20 @@
+---
+import AppShell from "../layouts/AppShell.astro";
+import QuizHub from "../components/interactive/QuizHub.tsx";
+import { quizzes } from "../data/quiz";
+---
+
+<AppShell title="Quiz hub · Inside Book a Slot" description="Every chapter self-check, grouped by module, in one place.">
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">Quiz hub</p>
+      <h1 class="page-title">Self-checks, by module</h1>
+      <p class="page-lead">
+        {quizzes.length} quizzes, {quizzes.reduce((s, q) => s + q.questions.length, 0)} questions —
+        taken from the real code and the passing tests. Pick one and pass it at 80%.
+      </p>
+    </header>
+
+    <QuizHub client:load />
+  </article>
+</AppShell>

@@ -1,0 +1,52 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const favicon =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%97%93%EF%B8%8F%3C/text%3E%3C/svg%3E";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href={favicon} />
+  </head>
+  <body>
+    <slot />
+
+    <script>
+      // Add a copy button to every rendered code block, except code blocks that
+      // live inside a React island. Mutating island DOM before React hydrates
+      // aborts hydration (React #418), so island-owned <pre> is left alone.
+      document.querySelectorAll("pre").forEach((pre) => {
+        if (pre.closest("astro-island")) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "code-copy";
+        btn.textContent = "copy";
+        btn.setAttribute("aria-label", "Copy code");
+        btn.addEventListener("click", async () => {
+          const text = pre.querySelector("code")?.innerText ?? pre.innerText;
+          try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = "copied ✓";
+          } catch {
+            btn.textContent = "select manually";
+          }
+          setTimeout(() => (btn.textContent = "copy"), 1600);
+        });
+        pre.appendChild(btn);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+---
+import AppShell from "../../layouts/AppShell.astro";
+import MigrationsTimeline from "../../components/diagrams/MigrationsTimeline.tsx";
+import { migrations } from "../../data/migrations";
+import Callout from "../../components/ui/Callout.astro";
+---
+
+<AppShell title="Migrations · Inside Book a Slot" description="The three Alembic migrations that build the schema.">
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">Reference</p>
+      <h1 class="page-title">Migrations</h1>
+      <p class="page-lead">
+        The authoritative schema. <code>alembic upgrade head</code> applies the chain
+        <code>0001 → 0002 → 0003</code> to real PostgreSQL — in Docker, that runs before
+        the API starts.
+      </p>
+    </header>
+
+    <MigrationsTimeline client:load />
+
+    <div class="mt-6 space-y-4">
+      {migrations.map((m) => (
+        <details class="group rounded-2xl border border-slate-200 bg-white">
+          <summary class="flex cursor-pointer list-none flex-wrap items-baseline gap-2 px-5 py-4">
+            <span class="font-semibold text-slate-800">{m.title}</span>
+            <span class="font-mono text-xs font-bold text-indigo-700">{m.id}</span>
+            <span class="ml-auto font-mono text-[11px] text-slate-400">{m.file}</span>
+          </summary>
+          <div class="border-t border-slate-100 px-5 py-4">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">What changed</p>
+            <ul class="mb-4 space-y-1 text-sm text-slate-700">
+              {m.changes.map((c) => (
+                <li>· {c}</li>
+              ))}
+            </ul>
+            <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Downgrade</p>
+            <ul class="space-y-1 text-sm text-slate-700">
+              {m.downgrade.map((c) => (
+                <li>· {c}</li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      ))}
+    </div>
+
+    <Callout kind="note" title="Why 0002 exists">
+      The initial schema made <code>customer_id NOT NULL</code> — which would have made
+      "provider opens a slot with no customer yet" impossible. Migration 0002 relaxes it and
+      adds the (still unused) <code>reviews.summary</code> column. Chapter 5 tells the story.
+    </Callout>
+  </article>
+</AppShell>

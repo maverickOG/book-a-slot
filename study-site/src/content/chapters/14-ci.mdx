@@ -1,0 +1,119 @@
+---
+title: "CI: GitHub Actions pipeline"
+chapter: 14
+module: "confidence"
+order: 14
+summary: "The three jobs that run on every push — lint + tests, Docker build, and a live smoke test against real PostgreSQL and Redis."
+minutes: 9
+prereqs: ["13-testing"]
+tags: ["ci", "github-actions"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+import SourceLinks from "../../components/ui/SourceLinks.astro";
+
+<GlossaryTerm term="GitHub Actions" label="GitHub Actions" client:load />
+
+ workflows live in `.github/workflows/ci.yml` and run on push to `main` and on pull requests. The workflow has **three jobs**, intentionally split so a Docker failure can't mask a code failure.
+
+<Cite path=".github/workflows/ci.yml" />
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check app tests alembic
+      - name: Unit tests
+        run: pytest tests -q
+```
+
+## Job 1 · `lint-and-test` — the gatekeeper
+
+- Installs the project (`-e ".[dev]"`) with the dev extras (pytest, Ruff, HTTPX).
+- Runs Ruff over `app`, `tests`, and `alembic`.
+- Runs the full unit suite; `test_live.py` self-skips because `RUN_LIVE` isn't set here.
+
+This is the fastest feedback loop and it's the job the repo's own verification log keeps quoting: **53 passed, 1 skipped**.
+
+## Job 2 · `docker-build` — does the image build?
+
+```yaml
+docker-build:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - name: Build API image
+      run: docker build -t book-a-slot .
+```
+
+A separate job on purpose: container build failures (base image pulls, pip resolution on slim images) belong *here*, not tangled with unit-test steps.
+
+## Job 3 · `live-smoke` — prove it against the real stack
+
+```yaml
+live-smoke:
+  runs-on: ubuntu-latest
+  services:
+    postgres:
+      image: postgres:16-alpine
+      env:
+        POSTGRES_USER: book_a_slot
+        ...
+      options: >-
+        --health-cmd "pg_isready -U book_a_slot -d book_a_slot"
+        ...
+    redis:
+      image: redis:7-alpine
+      ...
+  steps:
+    - name: Live PostgreSQL and Redis smoke test
+      env:
+        DATABASE_URL: postgresql+psycopg://book_a_slot:book_a_slot@localhost:5432/book_a_slot
+        REDIS_URL: redis://localhost:6379/0
+        RUN_LIVE: "1"
+      run: pytest tests/test_live.py -q
+```
+
+Job **services** spin up disposable PostgreSQL and Redis containers for the life of the job only. With `DATABASE_URL`/`REDIS_URL` pointing at them and `RUN_LIVE=1`, the gated `test_live.py` becomes the full end-to-end probe:
+
+- `alembic upgrade head` against the *real* PostgreSQL,
+- provider slot → customer discovery → book → double-book **409** → complete,
+- review → duplicate **409** → author/provider **403**s → summarize,
+- real Redis `LRANGE review_summary_jobs` == `{"review_id": N}`.
+
+<Callout kind="tip" title="The same credentials, three places">
+  The Postgres role/db bootstrap values appear in <code>docker-compose.yml</code>, in the CI service block, and inside the URL strings. It is the same contract every time — which is exactly why the demo values are called out as something to rotate for production.
+</Callout>
+
+## Evidence, not promises
+
+CI run **34573662242** (commit `8e46364`): all three jobs passed — lint-and-test (Ruff clean, 53 passed / 1 skipped), docker-build (image built in seconds), live-smoke (the full journey against PostgreSQL 16 + Redis 7). It is the first time the application was proven against live PostgreSQL and Redis, and the repo's verification log records it as such.
+
+<SourceLinks
+  files={[
+    "tests/test_live.py",
+    "docker-compose.yml",
+    "Dockerfile",
+  ]}
+/>
+
+<QuizCard quizId="ci" client:load />

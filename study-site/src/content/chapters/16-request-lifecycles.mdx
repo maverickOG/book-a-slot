@@ -1,0 +1,93 @@
+---
+title: "Request lifecycle walkthroughs"
+chapter: 16
+module: "reference"
+order: 16
+summary: "Three end-to-end journeys traced through the actual code paths: signup+login+me, the booking ride, and review+summarise."
+minutes: 11
+prereqs: ["15-api-reference"]
+tags: ["lifecycle", "walkthrough"]
+---
+
+import RequestFlow from "../../components/diagrams/RequestFlow.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+Theory chapters explain pieces; here are three complete journeys. Each step names the real code that runs.
+
+## Journey 1 — from nobody to authenticated
+
+<RequestFlow
+  title="Signup, login, /auth/me"
+  steps={[
+    { method: "POST /auth/signup", title: "Create the account", detail: "Pydantic validates { email, password }. signup() checks for a duplicate email, hashes the password and commits a user with role='customer' (IntegrityError on the unique email → 400). Returns 201 {id, email, role}." },
+    { method: "POST /auth/login", title: "Get a token", detail: "login() finds the user, verify_password checks the hash, generates secrets.token_urlsafe(32), stores it in users.token, commits and returns { access_token, token_type: 'bearer' }. Wrong email or password → 401 either way — no account enumeration." },
+    { method: "GET /auth/me", title: "Use the token", detail: "The Authorization: Bearer <token> header is parsed by HTTPBearer. get_current_user SELECTs users WHERE token = <token>; matching user (or 401) → returns {id, email, role}, filtered by the MeResponse model so password_hash/token never leak." },
+  ]}
+  client:load
+/>
+
+## Journey 2 — the booking ride
+
+<RequestFlow
+  title="Open, discover, book"
+  steps={[
+    { method: "POST /bookings", title: "Provider opens slot", detail: "require_provider (403 if not provider) → BookingTimeFields validator rejects ends_at <= starts_at (422). New bookings row: status='pending', customer_id=NULL. 201." },
+    { method: "GET /bookings?status=pending", title: "Customer discovers", detail: "get_current_user → list_bookings branches on role. Customer + status=pending → WHERE status='pending' AND customer_id IS NULL. This is the DISCOVERY path: only genuinely available slots." },
+    { method: "POST /bookings/{id}/book", title: "Claim the slot", detail: "require_customer → 404 if missing → atomic UPDATE ... WHERE status='pending' AND customer_id IS NULL. rowcount==0 → 409 'Slot is no longer available'. Success sets customer_id + confirmed. 200." },
+    { method: "POST /bookings/{id}/complete", title: "Finish it", detail: "require_owner_or_admin (only provider/admin). Conditional UPDATE confirmed → completed. Rowcount 0 → 409. A completed booking now unlocks reviews." },
+  ]}
+  client:load
+/>
+
+## Journey 3 — review and enqueue summary
+
+<RequestFlow
+  title="Review → summarize"
+  steps={[
+    { method: "POST /reviews", title: "Write the review", detail: "require_customer → 404 booking → state check status must be COMPLETED (409 otherwise, BEFORE the author check) → require_booking_customer (403 → not the booker) → duplicate check (409) → commit with an IntegrityError backstop. Pydantic keeps rating 1–5. 201." },
+    { method: "POST /reviews/{id}/summarize", title: "Enqueue the job", detail: "customer-only + author-only (same require_booking_customer). rpush on 'review_summary_jobs' of json.dumps({\"review_id\": id}). Returns 202 { status: 'queued', review_id }. Nothing consumes it — by design." },
+  ]}
+  client:load
+/>
+
+## What travels through the stack, wire to disk
+
+Following a request end to end, every piece you've met has a seat at the table:
+
+1. **Uvicorn** accepts the TCP connection and hands the request to FastAPI.
+2. **FastAPI** routes to a function by method + path (the router prefix plays its part).
+3. **Pydantic** validates the body → possible <Pill tone="indigo">422</Pill>.
+4. **Dependencies** resolve: `get_db` opens a session; the auth dependency parses the header → possibly <Pill tone="rose">401</Pill>; a role dependency may 403 before the body runs.
+5. **The endpoint body** calls ownership helpers that may 403, and executes the guarded SQL.
+6. **SQLAlchemy** commits; on `IntegrityError` the code rolls back and returns a clean 4xx without a 500.
+7. FastAPI serializes the `response_model` back to JSON.
+
+<Cite path="app/routers/bookings.py" lines="146–169" />
+
+```python
+@router.post("/{booking_id}/book", response_model=BookingResponse)
+def book_slot(booking_id: int, db=Depends(get_db), current_user: User = Depends(require_customer)) -> Booking:
+    booking = get_booking_or_404(booking_id, db)
+    result = db.execute(
+        update(Booking)
+        .where(
+            Booking.id == booking.id,
+            Booking.status == BookingStatus.PENDING,
+            Booking.customer_id.is_(None),
+        )
+        .values(customer_id=current_user.id, status=BookingStatus.CONFIRMED)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=409, detail="Slot is no longer available")
+    db.commit()
+    db.refresh(booking)
+    return booking
+```
+
+Spot every layer? Path param → dependency (session + role) → 404 guard → atomic conditional UPDATE → rowcount verdict → commit/refresh/serialize. That ordering is the whole book, compressed into twenty lines.
+
+<QuizCard quizId="lifecycles" client:load />

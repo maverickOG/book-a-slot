@@ -1,0 +1,32 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import Footer from "../components/Footer.astro";
+import Sidebar from "../components/Sidebar.astro";
+import Topbar from "../components/Topbar.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  path?: string;
+}
+
+const { title, description, path: explicitPath } = Astro.props;
+
+// Normalize: Astro SSG may deliver "/quiz-hub/" with a trailing slash while
+// nav/breadcrumb lookups use canonical "/quiz-hub" pathnames.
+const rawPath = explicitPath ?? Astro.url.pathname;
+const path = rawPath === "/" ? "/" : rawPath.replace(/\/+$/, "");
+---
+
+<BaseLayout {title} {description}>
+  <div class="flex min-h-screen flex-col">
+    <Topbar path={path} />
+    <div class="mx-auto flex w-full max-w-[1440px] flex-1 gap-8 px-4 py-8 lg:px-8">
+      <Sidebar path={path} />
+      <main class="min-w-0 flex-1 pb-16">
+        <slot />
+      </main>
+    </div>
+    <Footer />
+  </div>
+</BaseLayout>

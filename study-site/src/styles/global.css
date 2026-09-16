@@ -1,0 +1,287 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    @apply bg-amber-50/40 text-slate-900 antialiased;
+    font-feature-settings: "cv11";
+  }
+
+  ::selection {
+    @apply bg-indigo-200;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-indigo-600;
+  }
+}
+
+/* ---------- In-chapter (markdown / MDX) typography ---------- */
+.chapter-content {
+  font-size: 1.0rem;
+  line-height: 1.75;
+  /* Surface prose tokens. Every chapter keeps the classic slate values below;
+     a dark surface (.dark-surface, defined further down) overrides these three
+     tokens so ALL its descendant p / strong / link text resolves to light
+     colors automatically — no per-element color hacks. */
+  --surface-text: var(--color-slate-700);
+  --surface-strong: var(--color-slate-900);
+  --surface-link: var(--color-indigo-700);
+  color: var(--surface-text);
+}
+.chapter-content > * + * {
+  margin-top: 1.1rem;
+}
+/* Island sections (RequestSimulator, WhichIsReal, OrderSteps) own their rhythm;
+   keep them off the modest 1.1rem sibling gap. */
+.chapter-content section.rounded-2xl {
+  margin-top: 2.25rem;
+  margin-bottom: 2.25rem;
+}
+.chapter-content h2 {
+  @apply text-2xl font-bold tracking-tight text-slate-900;
+}
+.chapter-content h2:not(:first-child) {
+  margin-top: 2.75rem;
+  margin-bottom: 0.6rem;
+}
+.chapter-content h3 {
+  @apply text-xl font-semibold tracking-tight text-slate-900;
+}
+.chapter-content h3:not(:first-child) {
+  margin-top: 2.25rem;
+  margin-bottom: 0.5rem;
+}
+.chapter-content h4 {
+  @apply text-base font-semibold text-slate-900;
+}
+.chapter-content h4:not(:first-child) {
+  margin-top: 1.75rem;
+  margin-bottom: 0.4rem;
+}
+.chapter-content p {
+  color: var(--surface-text);
+}
+.chapter-content strong {
+  @apply font-semibold;
+  color: var(--surface-strong);
+}
+/* Prose links only. `.btn` links are exempt: the old broad rule below used to
+   override the white text on indigo primary buttons everywhere in a chapter. */
+.chapter-content a:not(.btn) {
+  @apply font-medium underline decoration-indigo-300 underline-offset-2;
+  color: var(--surface-link);
+}
+
+/* --- buttons (used inside and outside .chapter-content) --- */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-colors;
+}
+.btn-primary {
+  @apply bg-indigo-600 text-white shadow-sm hover:bg-indigo-700;
+}
+.btn-secondary {
+  @apply border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-indigo-300 hover:text-indigo-700;
+}
+.chapter-content ul {
+  @apply list-disc pl-6 space-y-2;
+}
+.chapter-content ol {
+  @apply list-decimal pl-6 space-y-2;
+}
+.chapter-content li::marker {
+  @apply text-indigo-500;
+}
+.chapter-content hr {
+  @apply border-slate-200 my-8;
+}
+.chapter-content blockquote {
+  @apply border-l-4 border-indigo-200 pl-4 italic text-slate-600;
+}
+
+/* --- tables --- */
+.chapter-content table {
+  @apply w-full border-collapse text-sm bg-white rounded-lg overflow-hidden;
+}
+.chapter-content thead th {
+  @apply text-left bg-slate-100 text-slate-700 font-semibold px-3 py-2 border border-slate-200;
+}
+.chapter-content tbody td {
+  @apply px-3 py-2 border border-slate-200 align-top;
+  overflow-wrap: anywhere;
+}
+.chapter-content tbody tr:nth-child(even) {
+  @apply bg-slate-50/60;
+}
+
+/* --- inline code --- */
+.chapter-content :not(pre) > code {
+  @apply font-mono text-[0.85em] bg-slate-100 text-indigo-800 rounded-md px-1.5 py-0.5 border border-slate-200;
+}
+
+/* --- code blocks (Shiki) --- */
+.chapter-content pre,
+.md-pre {
+  @apply relative my-4 rounded-xl text-sm leading-relaxed overflow-x-auto;
+  background-color: #0d1117 !important;
+  color: #e6edf3 !important;
+}
+.chapter-content pre {
+  padding: 1rem 1.1rem;
+}
+.astro-code {
+  @apply py-4 px-5;
+}
+.code-copy {
+  @apply absolute top-2.5 right-2.5 z-10 rounded-md border border-white/15 bg-white/10 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition-opacity hover:bg-white/20;
+}
+pre:hover .code-copy {
+  opacity: 1;
+}
+
+/* --- sidebar learning-state markers --- */
+.sidebar-marker {
+  @apply inline-block text-center tabular-nums;
+  color: transparent;
+}
+.sidebar-marker[data-state="opened"] {
+  color: var(--color-slate-300);
+  font-weight: 600;
+}
+.sidebar-marker[data-state="read"] {
+  color: var(--color-indigo-500);
+}
+.sidebar-marker[data-state="passed"] {
+  color: var(--color-emerald-700);
+  font-weight: 700;
+}
+.sidebar-marker[data-state="mastered"] {
+  color: var(--color-amber-600);
+  font-weight: 700;
+}
+/* Active chapter: an inset left bar keeps the row width constant — no negative
+   margins or border shifting, so nothing moves when the active row changes. */
+.chapter-link-active {
+  box-shadow: inset 3px 0 0 0 var(--color-indigo-600);
+}
+
+/* --- Mobile chapter contents --- */
+.chapter-mini-toc {
+  @apply flex flex-wrap gap-1.5;
+}
+.chapter-mini-toc a {
+  @apply rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700;
+}
+
+/* --- page header rhythm --- */
+.page-header {
+  @apply mb-8 border-b border-slate-200 pb-6;
+}
+.page-eyebrow {
+  @apply mb-2 text-xs font-semibold uppercase tracking-widest text-indigo-600;
+}
+.page-title {
+  @apply text-3xl font-bold tracking-tight text-slate-900;
+}
+.page-lead {
+  @apply mt-3 text-lg text-slate-600;
+}
+/* Unlayered overrides: .chapter-content prose colors would otherwise wash the
+   eyebrow/lead out (same cascade issue as the dark-panel text). */
+.chapter-content .page-eyebrow { color: var(--color-indigo-600); }
+.chapter-content .page-lead { color: var(--color-slate-600); }
+
+/* --- callout / definition styles --- */
+.callout {
+  @apply my-4 flex gap-3 rounded-xl border p-4 text-sm leading-relaxed;
+}
+.chapter-content .callout {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.def-term {
+  @apply border-b-2 border-dotted border-indigo-400 cursor-help font-semibold text-indigo-700 px-0.5 transition-colors;
+}
+.def-term:hover {
+  background: var(--color-indigo-50);
+}
+
+/* --- Dark surfaces ---
+   Any panel painted on a dark background (request flow, DockerStack env block,
+   simulator request panel, WhichIsReal caption) carries the `dark-surface`
+   class. It overrides the three surface prose tokens, so every paragraph,
+   `<strong>` and prose link inside resolves to a light, legible color instead
+   of falling back to slate-700-on-slate-900. One mechanism for every dark
+   panel; the token defaults on `.chapter-content` keep light surfaces
+   byte-identical. */
+.dark-surface {
+  --surface-text: #e2e8f0; /* slate-200 */
+  --surface-strong: #f8fafc; /* slate-50 */
+  --surface-link: #a5b4fc; /* indigo-300 */
+  color: var(--surface-text);
+}
+
+/* --- Static Request Simulator contrast ---
+   The dark request panel is itself a `.dark-surface`, so its paragraphs resolve
+   to the light `--surface-text` token (see above). The auth line keeps a
+   slightly dimmer secondary tone; the response panel is light (slate-50) prose
+   secondary; the status pill is emerald-on-dark by design. */
+.chapter-content .sim-auth-line { color: #cbd5e1; }
+.chapter-content .sim-response-panel p:not(.sim-status-pill) { color: #64748b; }
+.chapter-content .sim-status-pill { color: #6ee7b7; }
+
+/* --- Code puzzle verdict (inherit its tinted region's color) --- */
+.chapter-content .puzzle-result { color: inherit; }
+
+/* --- scrollbar (subtle) --- */
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full;
+}
+
+/* --- reduced motion respected for diagram animations --- */
+@keyframes hop {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(6px);
+    opacity: 0.4;
+  }
+}
+.diagram-pulse {
+  animation: hop 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .diagram-pulse {
+    animation: none;
+  }
+}

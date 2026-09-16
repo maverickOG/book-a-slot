@@ -1,0 +1,50 @@
+---
+import AppShell from "../layouts/AppShell.astro";
+import { glossary } from "../data/glossary";
+
+const categories = [
+  "Python",
+  "FastAPI",
+  "Database",
+  "Auth",
+  "Infra",
+  "Testing",
+  "Domain",
+  "Project",
+] as const;
+---
+
+<AppShell title="Glossary · Inside Book a Slot" description="Plain-English definitions of every term used in the project.">
+  <article class="chapter-content">
+    <header class="page-header">
+      <p class="page-eyebrow">Glossary</p>
+      <h1 class="page-title">Glossary</h1>
+      <p class="page-lead">
+        Browse {glossary.length} terms here. In lessons, highlighted terms can be opened for quick definitions.
+      </p>
+    </header>
+
+    {categories.map((cat) => {
+      const entries = glossary.filter((g) => g.category === cat);
+      if (entries.length === 0) return null;
+      return (
+        <section class="mb-8">
+          <h2 class="mb-3 flex items-center gap-2 text-xl font-bold text-slate-900">
+            {cat}
+            <span class="rounded-full bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-medium text-slate-500">
+              {entries.length}
+            </span>
+          </h2>
+          <dl class="grid gap-3 md:grid-cols-2">
+            {entries.map((entry) => (
+              <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <dt class="font-mono text-sm font-bold text-indigo-700">{entry.term}</dt>
+                <dd class="mt-1 text-sm leading-relaxed text-slate-600">{entry.definition}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      );
+    })}
+  </article>
+</AppShell>

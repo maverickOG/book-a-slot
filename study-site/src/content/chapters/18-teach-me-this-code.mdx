@@ -1,0 +1,88 @@
+---
+title: "Teach me this code: a guided reading"
+chapter: 18
+module: "beyond"
+order: 18
+summary: "The technique for reading any Python file in this repo, demonstrated line-by-line on the most instructive function: book_slot."
+minutes: 12
+prereqs: ["16-request-lifecycles"]
+tags: ["reading-code", "technique"]
+---
+
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import Pill from "../../components/ui/Pill.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+When you open a Python file you've never seen, run this checklist — it works on every file in this repo.
+
+## The four questions
+
+1. **What does this file export?** A router (`auth`, `bookings`, `reviews`), a dependency (`security.py`), a config surface (`database.py`).
+2. **What is wired by FastAPI?** Look for `Depends(...)` parameters and decorators — those are the framework's promises to this function.
+3. **What are the guards, in order?** List every `HTTPException` and the condition that raises it. This reveals the security posture at a glance.
+4. **What changes on disk?** Which SQLAlchemy calls mutate (`add`, `commit`, `delete`, `update`) versus read (`scalar`, `get`, `select`)?
+
+## Worked example: `book_slot`
+
+<Cite path="app/routers/bookings.py" lines="146–169" /> (also in chapter 16)
+
+```python
+@router.post("/{booking_id}/book", response_model=BookingResponse)
+def book_slot(booking_id: int, db: Session = Depends(get_db),
+              current_user: User = Depends(require_customer)) -> Booking:
+    booking = get_booking_or_404(booking_id, db)
+    result = db.execute(
+        update(Booking)
+        .where(
+            Booking.id == booking.id,
+            Booking.status == BookingStatus.PENDING,
+            Booking.customer_id.is_(None),
+        )
+        .values(customer_id=current_user.id, status=BookingStatus.CONFIRMED)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=409, detail="Slot is no longer available")
+    db.commit()
+    db.refresh(booking)
+    return booking
+```
+
+Applying the checklist:
+
+**1 — Holds a router.** Everything here lives under `/bookings/{id}/book`.
+
+**2 — FastAPI wiring:**
+- `booking_id: int` → path parameter.
+- `db: Session = Depends(get_db)` → a fresh session per request.
+- `current_user: User = Depends(require_customer)` → auth + role gate *before the body runs*. A customer is guaranteed (else 403).
+
+**3 — Guards in order:**
+- `get_booking_or_404` → 404 if missing.
+- The `WHERE` clause → the DB itself refuses a non-pending or already-taken slot.
+- `result.rowcount == 0` → 409 if the row was claimed underneath us.
+
+**4 — Disk writes:**
+- `update(Booking)` + `.values(...)` + `db.commit()` → one row mutated, once.
+- `db.refresh(booking)` → pull the committed values back into the ORM object so `response_model` serialises the truth.
+
+**The one-sentence takeaway:** this endpoint does *authorize, then atomically write —* the DB's WHERE is the concurrency lock, and rowcount is its verdict.
+
+<Callout kind="tip" title="Read it as a pipeline">
+  "route → validate → authorise → 404-guard → atomic write → verdict → return" appears across this codebase. Once it clicks in <code>book_slot</code>, it clicks everywhere.
+</Callout>
+
+## Graduated exercises (try them on the Code browser)
+
+1. **`POST /reviews`** — add the rejection-order question: why must the completed-state check run *before* the author check? (Hint: pending slots have `customer_id IS NULL`.)
+2. **`GET /bookings`** — trace the `else:` branch: prove a customer with `?status=pending` can never see another customer's booking.
+3. **`get_current_user`** — how many failure modes produce a 401, and why is `scheme.lower() != "bearer"` a *malformed-header* catch?
+4. **`alembic upgrade head` in Compose** — which two guarantees does `depends_on: condition: service_healthy` plus the command string give you, together?
+
+## The meta-lesson
+
+Most of the "Python" here is plumbing; the *interesting* code is the conditional UPDATE and the guarded state machine. Learn to separate "framework ceremony" from "domain logic", and every file in the repo gets faster to read — including the tests, which read like a spec.
+
+<QuizCard quizId="teachme" client:load />

@@ -1,0 +1,94 @@
+---
+title: "Docker and Docker Compose, from zero"
+chapter: 11
+module: "running"
+order: 11
+summary: "Images, containers, volumes and healthchecks — and the exact Compose file that makes 'docker compose up' bring up the whole stack."
+minutes: 12
+prereqs: ["02-architecture"]
+tags: ["docker", "compose", "containers"]
+---
+
+import DockerStack from "../../components/diagrams/DockerStack.tsx";
+import Callout from "../../components/ui/Callout.astro";
+import Cite from "../../components/ui/Cite.astro";
+import GlossaryTerm from "../../components/interactive/GlossaryTerm.tsx";
+
+import QuizCard from "../../components/interactive/QuizCard.tsx";
+
+Docker packages software with everything it needs into an <GlossaryTerm term="image" label="image" client:load />. A running image is a <GlossaryTerm term="container" label="container" client:load />. Compose is a YAML description of several containers that belong together.
+
+<DockerStack client:load />
+
+## The API image: `Dockerfile`
+
+<Cite path="Dockerfile" />
+
+```dockerfile
+FROM python:3.14-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY pyproject.toml ./
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
+RUN pip install --no-cache-dir .
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+- Base image: Python 3.14 on a slim Debian.
+- The `COPY` lines bring in exactly the code the app needs (the `.dockerignore` keeps `tests`, `.git`, `.venv`, **and `AGENTS.md`** out of the image).
+- `pip install .` installs the package from `pyproject.toml` (non-editable), then the default command serves the API.
+
+Note the image bits *not* included: migrations run in Compose, not baked in. `alembic upgrade head` happens at container start.
+
+<Callout kind="tip" title="Why the environment flags?">
+  <code>PYTHONDONTWRITEBYTECODE=1</code> stops stray <code>__pycache__</code> files; <code>PYTHONUNBUFFERED=1</code> makes logs stream instead of buffering. Both are standard hygiene for containerised Python.
+</Callout>
+
+## The stack: `docker-compose.yml`
+
+Three services under one command. The interesting bits:
+
+```yaml
+db:
+  image: postgres:16-alpine
+  environment:
+    POSTGRES_USER: book_a_slot
+    POSTGRES_PASSWORD: book_a_slot
+    POSTGRES_DB: book_a_slot
+  volumes:
+    - pgdata:/var/lib/postgresql/data
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+```
+
+- `pgdata` is a named <GlossaryTerm term="volume" label="volume" client:load /> — your database survives `docker compose down` and rebuilds.
+- The injected `$${}` inside healthcheck refers to the container env var, not a shell variable from outside.
+- The API service declares `depends_on: db: condition: service_healthy` and the same for redis, then its own command runs migrations before uvicorn. Startup is *ordered*, not just *ranked*.
+
+## Running it all
+
+```bash
+docker compose up --build
+```
+
+That builds the API image, starts Postgres 16 and Redis 7, waits for both healthchecks, applies migrations, then serves the API on `http://localhost:8000`. API docs appear at `http://localhost:8000/docs`.
+
+<Callout kind="warn" title="Ports are forwarded for local development">
+  Compose maps <code>5432</code>, <code>6379</code> and <code>8000</code> to the host so you can reach the database, Redis, and the API locally. In a deploy you would not expose the database port at all.
+</Callout>
+
+## The mental model
+
+- **Image** = recipe; **container** = dish being served.
+- **Compose** = table of contents for the whole menu.
+- **Volume** = pantry that survives cleanups.
+- **Healthcheck** = "don't seat the next service until this one is ready."
+- **Command** = what to do when the table opens.
+
+Everything in this chapter is verifiable: the Compose YAML, the Dockerfile, and the `.dockerignore` are frozen copies in the Code browser.
+
+<QuizCard quizId="docker" client:load />
