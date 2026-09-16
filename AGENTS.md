@@ -1041,6 +1041,27 @@ The brief is silent on it, and every added feature must be explainable. It can
 be added later if a concrete requirement appears (e.g. demo credentials in the
 README).
 
+### 2026-09-16 Issue #1 leaked-secret report triage
+
+**Decision:**
+Treat issue #1 ("Possible exposed API Key / Secret" claiming a HashiCorp
+Terraform password in commit `e33d36f`) as a likely false-positive/bait report
+after direct commit and history inspection, and add a regression test that scans
+tracked files for common HashiCorp/Terraform credential formats.
+
+**Reason:**
+The referenced commit does not contain Terraform/HashiCorp integration code or
+any token-like value, and repository-history grep over known HashiCorp token
+formats returned no hits. A lightweight regression test gives objective,
+repeatable evidence inside CI without expanding application scope.
+
+**Alternative considered:**
+Rotating external credentials and rewriting git history.
+
+**Why rejected:**
+No qualifying credential was found to rotate, and destructive history rewriting
+for an unverified alert is unnecessary and high-risk.
+
 ---
 
 # 11. Lessons Learned
@@ -1070,6 +1091,22 @@ existing environment reproducibly from `pyproject.toml`.
 **What future agents should do:**
 Check the existing virtual environment before running checks, and install only the
 dependencies declared for the current milestone when tools are missing.
+
+### 2026-09-16 Secret-report triage evidence
+
+**What happened:**
+An external issue claimed a leaked HashiCorp Terraform password in commit
+`e33d36f`, but the repository does not use Terraform/HashiCorp services.
+
+**What we learned:**
+Public "credential leak" reports can be spam or generic scanner false positives.
+Before rotating/revoking anything, verify the exact commit and scan history for
+format-specific token patterns.
+
+**What future agents should do:**
+Validate similar reports with commit-level inspection plus regex-based history
+search first, then automate a narrow regression check when the alert is unproven
+but likely to reoccur.
 
 ### 2026-09-11 Milestone 2 implementation
 
@@ -1241,6 +1278,22 @@ All checks passed. Ruff reported no issues; pytest collected one test and report
 **Notes:**
 Pytest reported two third-party deprecation warnings from the installed Starlette/
 AnyIO stack. They do not affect the passing test or application behavior.
+
+### 2026-09-16 Issue #1 leaked-secret triage verification
+
+**Command/check:**
+`git show --name-only e33d36f` to inspect the reported commit; full-history grep
+over `git rev-list --all` for Terraform/HashiCorp keywords and token patterns;
+new regression test `tests/test_secret_patterns.py`; targeted pytest and Ruff.
+
+**Result:**
+No HashiCorp/Terraform credential evidence found in the reported commit or
+searchable history. The new regression test passed and reported zero matches.
+
+**Notes:**
+This confirms the report is most likely bait/false positive for repository code
+content. If future alerts include concrete token values, verify and rotate in
+the owning external system immediately.
 
 ### 2026-09-11 Milestone 2 verification
 
@@ -1572,6 +1625,19 @@ Format:
 - Not yet done: the brief's 300–500 word written technical note remains
   outstanding and is the only remaining assessment deliverable.
 - Commit: `66d9ef4` (`docs: add README and MIT license`), pushed; see the git log.
+
+### 2026-09-16 Issue #1 leaked-secret triage hardening
+
+- Changed: Added `tests/test_secret_patterns.py`, which scans tracked files for
+  common HashiCorp/Terraform credential formats (`hcp_...`, `hvs....`,
+  `atlasv1....`, `TF_TOKEN_*` assignments). Updated AGENTS.md with the triage
+  decision, lesson, verification, and this change-log entry.
+- Reason: A public issue claimed a leaked HashiCorp Terraform password in
+  `e33d36f`; direct commit/history inspection found no evidence. The test gives
+  repeatable proof and catches future accidental additions of those patterns.
+- Verification: Targeted pytest on `tests/test_secret_patterns.py` and Ruff on
+  the new test file.
+- Commit: Pending in current branch.
 
 ---
 
