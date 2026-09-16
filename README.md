@@ -10,6 +10,14 @@ The service is built with **FastAPI**, persists to **PostgreSQL**, and runs as
 a Docker Compose stack (API + PostgreSQL + Redis) with continuous integration
 via GitHub Actions.
 
+> **A note about `study-site/`**
+> The [`study-site/`](./study-site) folder is **not associated with this
+> project**. It is a separate, personal study companion ("Inside Book a Slot")
+> that teaches this repository's code chapter by chapter, with quizzes and
+> interactive playgrounds. It is not the assessment submission, is not run or
+> tested by this project's Docker stack or CI, and has no effect on the API.
+> See [study-site/README.md](./study-site/README.md) for what it is built for.
+
 ## Features
 
 - **Authentication** — email/password signup and login with PBKDF2-SHA256
