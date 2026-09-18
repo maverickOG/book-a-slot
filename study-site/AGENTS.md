@@ -478,6 +478,33 @@ preview 4789 and on dev 4788**; `npm run build` (`astro check` + `astro build`,
 
 Reverse-chronological; dates appear only where the local record contains them.
 
+**2026-09-18 — Footer + `/start` copy — stale "ignored by Git" wording corrected:**
+- Changed (all under `study-site/`): `src/components/Footer.astro` and
+  `src/pages/start.astro` replaced the now-false "is ignored by Git" /
+  "never touches the assessment repo" wording with statements that the source
+  is tracked in the public `book-a-slot` repository, runs independently of the
+  API, and is not part of the submission.
+- Reason: D14 (2026-09-16) folded `study-site/` into the parent repository and
+  pushed it to GitHub, so "ignored by Git" was factually wrong on the footer
+  and `/start`.
+- Verification: no spec asserts the old wording (grep over `tests/e2e/` found
+  none); `npm run build` (`astro check` + `astro build`, 30 pages) passes; full
+  suite green on **both** preview 4789 and dev 4788 — **128 passed, 0 failed
+  on each**.
+
+**2026-09-18 — Study-site README added + parent README disclaimer:**
+- Changed: Added `study-site/README.md` (purpose and non-association
+  disclaimer, content surfaces, code grounding, tech stack, setup commands,
+  Playwright testing instructions, project structure, and design rules) and a
+  callout at the top of the parent `README.md` stating the study site is not
+  associated with the assessment project.
+- Reason: document what the study site is built for and keep the standalone
+  site self-documenting now that it is tracked and pushed with the parent.
+- Verification: `npm run build` (`astro check` + `astro build`, 30 pages)
+  passes; full Playwright suite green on **both** preview 4789 and dev 4788 —
+  **128 passed, 0 failed on each**; parent README reviewed against the
+  repository state.
+
 **2026-09-16 — Folded into the parent repository and pushed to the public GitHub:**
 - Changed: `study-site/` was removed from the parent `.gitignore`; the nested git
   repository (`study-site/.git`) was deleted so the parent repo tracks the real

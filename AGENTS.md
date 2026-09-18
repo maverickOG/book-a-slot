@@ -546,7 +546,7 @@ Commit:
 
 ## Milestone 8 — Documentation + Technical Note
 
-Status: PARTIALLY COMPLETE
+Status: COMPLETE
 
 Planned:
 - README
@@ -556,47 +556,44 @@ Planned:
 - 300–500 word technical note
 - production-readiness considerations
 
-Completed commit `66d9ef4` (`docs: add README and MIT license`):
-- `README.md` (450 lines) documents the whole project: overview, features, tech
-  stack, architecture, project structure, setup instructions (Docker Compose
-  and non-Docker local development), configuration, database migrations, API
-  and endpoint documentation with the booking model, authentication & RBAC,
-  Redis/review summarisation, testing, Docker, CI, API documentation links,
-  and production-readiness considerations.
-- `LICENSE` adds the MIT License (Copyright (c) 2026 Sajit Magesh); the README
-  License section links to it.
-- HEAD and `origin/main` both point at `66d9ef4`.
-
-Outstanding:
-- The brief's 300–500 word written technical note (schema/normalisation
-  rationale, RBAC extensibility for a fourth role or nested organisations,
-  production-safety gaps) has NOT been written. It is the only remaining
-  assessment deliverable. Do not treat it as complete or as already covered by
-  the README — it is outstanding work.
+Completed:
+- `66d9ef4` (`docs: add README and MIT license`): `README.md` documents the
+  whole project (overview, features, tech stack, architecture, project
+  structure, setup instructions, configuration, migrations, API and endpoint
+  documentation with the booking model, authentication & RBAC, Redis/review
+  summarisation, testing, Docker, CI, API documentation links, and
+  production-readiness considerations) and the MIT `LICENSE` (Copyright
+  (c) 2026 Sajit Magesh); the README License section links to it.
+- `5393e74` (`docs: add technical note`): `TECHNICAL_NOTE.md` is the brief's
+  written technical note covering schema/normalisation rationale, RBAC
+  extensibility for a fourth role or nested organisations, and
+  production-readiness gaps.
+- `4a066fe` (`docs: complete project documentation`): final AGENTS.md
+  documentation pass.
 
 ---
 
 # 9. Current Task
 
-**Current milestone:** None — every implementation milestone is finished. The
-only remaining assessment deliverable is the 300–500 word written technical
-note required by the brief.
+**Current milestone:** None — every assessment deliverable is finished,
+including the technical note (`TECHNICAL_NOTE.md`). The only remaining step is
+the final submission review.
 
-**Current state:** Milestones 1–7 are COMPLETE and Milestone 8 is PARTIALLY
-COMPLETE. Milestones 1–5 were committed as individual feature commits
-(`7aeb3b9` scaffold through `e33d36f` reviews). Milestone 6 (Docker + GitHub
-Actions + live smoke test) was committed as 5 commits (`9c2c9fb` through
-`8e46364`): `Dockerfile`, `docker-compose.yml` (PostgreSQL 16 + Redis 7 + API),
-`.github/workflows/ci.yml` (lint + unit tests, Docker build, live smoke),
-`tests/test_live.py`, `.env.example`, and AGENTS.md docs. No application code,
-dependencies, migrations, or existing unit tests changed in M6; CI run
-34573662242 passed all 3 jobs, including live-smoke against real PostgreSQL 16
-+ Redis 7. Milestone 7 (GitHub Actions verification) was recorded and pushed in
-`cd50e7c` (`chore(docs): record CI verification and update project state`).
-Milestone 8 documentation work committed README + MIT License in `66d9ef4`
-(`docs: add README and MIT license`), but the brief's 300–500 word written
-technical note has NOT been produced and remains the sole outstanding
-deliverable. HEAD and `origin/main` both point at `66d9ef4`.
+**Current state:** Milestones 1–8 are COMPLETE. Milestones 1–5 were committed
+as individual feature commits (`7aeb3b9` scaffold through `e33d36f` reviews).
+Milestone 6 (Docker + GitHub Actions + live smoke test) was committed as 5
+commits (`9c2c9fb` through `8e46364`): `Dockerfile`, `docker-compose.yml`
+(PostgreSQL 16 + Redis 7 + API), `.github/workflows/ci.yml` (lint + unit tests,
+Docker build, live smoke), `tests/test_live.py`, `.env.example`, and AGENTS.md
+docs. CI run 34573662242 passed all 3 jobs, including live-smoke against real
+PostgreSQL 16 + Redis 7. Milestone 7 was recorded and pushed in `cd50e7c`.
+Milestone 8 shipped the README + MIT License (`66d9ef4`), the technical note
+(`5393e74`), and the final documentation pass (`4a066fe`). After the
+assessment work, the repository gained a HashiCorp/Terraform secret-pattern
+regression test (merged via PR #2, `b0ec014`) and now also tracks the
+`study-site/` frontend (`3839e08`) plus a study-site README and a parent-README
+disclaimer clarifying the study site is not associated with this project
+(`40e2c52`). HEAD and `origin/main` both point at `40e2c52`.
 
 FastAPI learning has been completed through:
 - application creation
@@ -1477,6 +1474,25 @@ Three jobs: `lint-and-test`, `docker-build`, `live-smoke`. Verified via
 This is the first time the application has been proven against live PostgreSQL
 and Redis.
 
+### 2026-09-18 Repository state verification
+
+**Command/check:**
+`.venv/bin/ruff check app tests alembic`; `.venv/bin/pytest tests -q`;
+`git status`/`git log` review of HEAD after the study-site fold-in and the
+study-site README / parent README disclaimer commits.
+
+**Result:**
+Ruff passed; pytest collected 55 tests and reported `54 passed, 1 skipped`
+(the skipped test is `tests/test_live.py`, gated by `RUN_LIVE=1`; the extra
+test versus the M6 record is `tests/test_secret_patterns.py` added in PR #2).
+HEAD and `origin/main` point at `40e2c52`.
+
+**Notes:**
+Documentation-only pass; no application, migration, Docker, or CI changes.
+AGENTS.md sections 8/9/15 were updated to reflect Milestone 8 completion, the
+merged secret-pattern regression test, the study-site fold-in (`3839e08`), and
+the study-site README + parent README disclaimer (`40e2c52`).
+
 ---
 
 # 14. Change Log
@@ -1632,23 +1648,34 @@ Format:
 - Commit: `cd50e7c` (`chore(docs): record CI verification and update project
   state`), pushed; see the git log.
 
-### 2026-09-11 Milestone 8 (partial) — README + MIT License committed
+### 2026-09-11 Milestone 8 — README + MIT License committed
 
-- Changed: Added `README.md` (450 lines: overview, features, tech stack,
-  architecture, project structure, setup instructions, configuration, database
-  migrations, API/endpoint documentation, authentication & RBAC, Redis/review
-  summarisation, testing, Docker, CI, API docs links, production-readiness
-  considerations) and the MIT `LICENSE` (Copyright (c) 2026 Sajit Magesh); the
-  README License section links to it.
+- Changed: Added `README.md` (overview, features, tech stack, architecture,
+  project structure, setup instructions, configuration, database migrations,
+  API and endpoint documentation, authentication & RBAC, Redis/review
+  summarisation, testing, Docker, CI, API documentation links,
+  production-readiness considerations, license) and the MIT `LICENSE`
+  (Copyright (c) 2026 Sajit Magesh); the README License section links to it.
 - Reason: Delivered the documentation portion of Milestone 8 (running
   application + setup documentation) as required by the brief.
 - Verification: README and LICENSE reviewed against the actual repository
   state and git history (`66d9ef4` adds exactly these two files); no code,
-  test, migration, Docker, or CI changes. HEAD and `origin/main` both point
-  at `66d9ef4`.
-- Not yet done: the brief's 300–500 word written technical note remains
-  outstanding and is the only remaining assessment deliverable.
+  test, migration, Docker, or CI changes.
 - Commit: `66d9ef4` (`docs: add README and MIT license`), pushed; see the git log.
+
+### 2026-09-11 Milestone 8 completed — technical note added
+
+- Changed: Added `TECHNICAL_NOTE.md` — the brief's 300–500 word written
+  technical note covering schema/normalisation rationale, RBAC extensibility
+  for a fourth role or nested organisations, and production-safety gaps — plus
+  a final AGENTS.md documentation pass.
+- Reason: Completed the last outstanding Milestone 8 deliverable required by
+  the brief.
+- Verification: The note addresses all three required topics; the README
+  covers the remaining deliverable scope; documentation-only (no app, test,
+  migration, Docker, or CI changes).
+- Commit: `5393e74` (`docs: add technical note`) and `4a066fe` (`docs: complete
+  project documentation`); see the git log.
 
 ### 2026-09-16 Issue #1 leaked-secret triage hardening
 
@@ -1661,7 +1688,8 @@ Format:
   repeatable proof and catches future accidental additions of those patterns.
 - Verification: Targeted pytest on `tests/test_secret_patterns.py` and Ruff on
   the new test file.
-- Commit: Pending in current branch.
+- Commit: `b0ec014` (`test(security): add HashiCorp secret-pattern regression
+  check`), merged via PR #2 (`1c721a8`); see the git log.
 
 ### 2026-09-16 study site folded into the parent repository
 
@@ -1679,23 +1707,41 @@ Format:
   ruff/pytest are unaffected (no app, test, migration, Docker, or CI changes).
 - Commit: see the git log.
 
+### 2026-09-18 study-site README + parent README disclaimer
+
+- Changed: Added `study-site/README.md` (purpose and non-association
+  disclaimer, content surfaces, code grounding, tech stack, setup commands,
+  Playwright testing instructions, project structure, and design rules) and a
+  callout at the top of the parent `README.md` stating `study-site/` is not
+  associated with this project.
+- Reason: Document what the study site is built for and make explicit — at the
+  top of the parent README and in the study-site README — that it is not part
+  of, and has no effect on, the assessment project.
+- Verification: Ruff passed; pytest collected 55 tests and reported
+  `54 passed, 1 skipped`; both READMEs reviewed against the actual repository
+  state.
+- Commit: `40e2c52` (`docs(study): add study-site README and disclaimer in
+  parent README`), pushed; see the git log.
+
 ---
 
 # 15. Current Next Steps
 
 This section must always reflect the immediate next actions.
 
-All implementation milestones (M1–M7) are complete, and the M8 README + MIT
-License work is committed at `66d9ef4` (HEAD = `origin/main`). The ONLY
-remaining assessment deliverable is the brief's 300–500 word written technical
-note (schema/normalisation rationale, RBAC extensibility for a fourth role or
-nested organisations, production-readiness gaps). It has not been written yet.
+All implementation milestones (M1–M8) are complete, including the technical
+note (`5393e74`). The 300–500 word technical note required by the brief exists
+at `TECHNICAL_NOTE.md`. The repository also tracks the `study-site/` frontend
+and documents, in both the parent README and the study-site README, that the
+study site is not associated with the assessment project.
 
 Next actions:
-1. Write the 300–500 word written technical note required by the brief.
-2. Perform a final submission review of the repository and the note before
-   submitting the repository link and setup documentation to the placement
-   coordinator. Milestone 8 remains PARTIALLY COMPLETE until the note exists.
+1. Perform a final submission review of the repository (README, technical
+   note, CI status, and the study-site README disclaimer) before submitting
+   the repository link and setup documentation to the placement coordinator.
+2. If any further code or documentation change is made, follow the Section 6
+   verification rules (ruff, pytest, and the live smoke test) and keep this
+   file updated.
 
 Standing guidance (not pending work):
 1. Do not create further milestones — the assessment has no milestones after
